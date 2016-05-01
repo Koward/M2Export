@@ -1,15 +1,14 @@
 ﻿using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("M2Translator")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyDescription("M2 Export plugin for Maya 2016")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("M2Translator")]
+[assembly: AssemblyCompany("Koward")]
+[assembly: AssemblyProduct("M2Export")]
 [assembly: AssemblyCopyright("Copyright © 2016")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
