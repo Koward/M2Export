@@ -77,22 +77,23 @@ namespace M2Export
 
             var wowModel = new M2();
             wowModel.Name = file.rawName.Substring(0, file.rawName.Length - 3);// Name is fileName without .m2 extension
-            wowModel.Views.Add(new M2SkinProfile());
-            var wowView = wowModel.Views[0];
+            var wowView = new M2SkinProfile();
 
             MGlobal.displayInfo("Building model " + wowModel.Name);
 
-            var dagIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kJoint);
-            while (!dagIter.isDone)
+            var boneIds = new Dictionary<MDagPath, int>();//Maps a joint MDagPath to the WoW bone index in the global bone list.
+
+            // JOINTS
+            var jointIter = new MItDependencyNodes(MFn.Type.kJoint);
+            while(!jointIter.isDone)
             {
-                var dagObject = dagIter.currentItem();
-                var joint = new MFnIkJoint(dagObject);
+                var mayaObject = jointIter.thisNode;
+                var joint = new MFnIkJoint(mayaObject);
                 var wowBone = new M2Bone();
                 var mayaPivot = joint.rotatePivot(MSpace.Space.kTransform);
                 wowBone.Pivot = new C3Vector((float) mayaPivot.x, (float) mayaPivot.y, (float) mayaPivot.z);
 
                 //Bone parenting
-                var boneIds = new Dictionary<MDagPath, int>();
                 var isRoot = false;
                 if (joint.parentCount == 0) isRoot = true;
                 else if (!joint.parent(0).hasFn(MFn.Type.kJoint)) isRoot = true;
@@ -105,12 +106,13 @@ namespace M2Export
                 {
                     wowBone.ParentBone = (short) boneIds[new MFnDagNode(joint.parent(0)).dagPath];
                     wowBone.KeyBoneId = M2Bone.KeyBone.Other;
-                    //TODO wowBone.KeyBoneId
+                    //TODO wowBone.KeyBoneId. Maybe with a special name the user sets ?
                     //Note : M2Bone.submesh_id is wrong in the wiki. Do not try to compute it.
                 }
                 wowModel.Bones.Add(wowBone);
                 boneIds[joint.dagPath] = wowModel.Bones.Count - 1;
 
+                /*
                 //Iterate through childs to find transforms and then subchilds to find meshes, then extract them.
                 for (uint i = 0; i < joint.childCount; i++)
                 {
@@ -125,10 +127,16 @@ namespace M2Export
                         ExtractMesh(subChild, wowView, wowModel.GlobalVertexList);
                     }
                 }
-
-                dagIter.next();
+                */
+                jointIter.next();
             }
 
+            var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
+            while (!meshIter.isDone)
+            {
+                ExtractMesh(meshIter.thisNode, wowView, wowModel.GlobalVertexList);
+                meshIter.next();
+            }
 
             // TEXTURES
             var texNodesIter = new MItDependencyNodes(MFn.Type.kFileTexture);
@@ -138,6 +146,8 @@ namespace M2Export
                 ExtractTexture(texNode, wowModel.Textures);
                 texNodesIter.next();
             }
+
+            wowModel.Views.Add(wowView);
 
             // OTHER
 
@@ -201,9 +211,9 @@ namespace M2Export
                 //TODO multiple textures per mesh. Maybe with getUVSets which gives multiple arrays of u and v you can index with vertex id ?
 
                 var wowVertex = new M2Vertex();
-                //Here I invert the Y axis.
-                wowVertex.Position = new C3Vector(mayaVertexPosition.x, -1*mayaVertexPosition.y, mayaVertexPosition.z);
-                wowVertex.Normal = new C3Vector(mayaVertexNormal.x, -1*mayaVertexNormal.y, mayaVertexNormal.z);
+                //Here I fix the axis
+                wowVertex.Position = new C3Vector(mayaVertexPosition.x, mayaVertexPosition.z, mayaVertexPosition.y);
+                wowVertex.Normal = new C3Vector(mayaVertexNormal.x, mayaVertexNormal.z, mayaVertexNormal.y);
                 wowVertex.TexCoords[0] = new C2Vector(mayaVertexUv[0], mayaVertexUv[1]);
                 //TODO things in vertex : boneWeights, boneIndices. Maybe in maya skinClusters ?
 
