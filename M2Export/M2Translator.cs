@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using Autodesk.Maya.OpenMaya;
 using Autodesk.Maya.OpenMayaAnim;
@@ -12,8 +13,6 @@ namespace M2Export
     public class M2Translator : MPxFileTranslator
     {
         protected static string FExtension = "m2";
-        protected static string FPluginName = "M2Export";
-        protected static string FTranslatorName = "World of Warcraft M2";
 
         public override string defaultExtension()
         {
@@ -28,16 +27,6 @@ namespace M2Export
         public override bool haveWriteMethod()
         {
             return true;
-        }
-
-        public static void SetPluginName(string name)
-        {
-            FPluginName = name;
-        }
-
-        public static string TranslatorName()
-        {
-            return FTranslatorName;
         }
 
         /// <summary>
@@ -109,32 +98,29 @@ namespace M2Export
                     //TODO wowBone.KeyBoneId. Maybe with a special name the user sets ?
                     //Note : M2Bone.submesh_id is wrong in the wiki. Do not try to compute it.
                 }
+                boneIds[joint.dagPath] = wowModel.Bones.Count;
                 wowModel.Bones.Add(wowBone);
-                boneIds[joint.dagPath] = wowModel.Bones.Count - 1;
 
-                /*
-                //Iterate through childs to find transforms and then subchilds to find meshes, then extract them.
-                for (uint i = 0; i < joint.childCount; i++)
-                {
-                    var child = joint.child(i);
-                    if (!child.hasFn(MFn.Type.kTransform)) continue;
-                    var childTransform = new MFnTransform(child);
-                    for (uint j = 0; j < childTransform.childCount; j++)
-                    {
-                        var subChild = childTransform.child(i);
-                        if (!subChild.hasFn(MFn.Type.kMesh)) continue;
-                        //var subChildMesh = new MFnMesh(subChild);
-                        ExtractMesh(subChild, wowView, wowModel.GlobalVertexList);
-                    }
-                }
-                */
                 jointIter.next();
             }
+            //Temporary TODO proper boneLookup
+            for(short i = 0; i < wowModel.Bones.Count; i++) wowModel.BoneLookup.Add(i);
 
             var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
             while (!meshIter.isDone)
             {
-                ExtractMesh(meshIter.thisNode, wowView, wowModel.GlobalVertexList);
+                var wowMesh = new M2SkinSection();
+                wowMesh.SubmeshId = 0;//TODO give a unique ID maybe ?
+                ExtractMesh(meshIter.thisNode, wowMesh, wowView, wowModel.GlobalVertexList);
+
+                // BONE LINKING TODO
+                for (int i = wowMesh.StartVertex; i < wowMesh.StartVertex + wowMesh.NVertices; i++)
+                {
+                    var vert = wowModel.GlobalVertexList[wowView.Indices[i]];
+                    wowView.Properties.Add(new VertexProperty(vert.BoneIndices));//Assumes index in bones == index in boneLookup TODO change it
+                }
+
+                wowView.Submeshes.Add(wowMesh);
                 meshIter.next();
             }
 
@@ -153,7 +139,7 @@ namespace M2Export
 
             if(wowModel.Materials.Count == 0) wowModel.Materials.Add(new M2Material());
             if(wowModel.Sequences.Count == 0) wowModel.Sequences.Add(new M2Sequence());
-            if(wowModel.Bones.Count == 0) wowModel.Bones.Add(new M2Bone());//May become useless since there is always a transform at top in Maya.
+            if(wowModel.Bones.Count == 0) wowModel.Bones.Add(new M2Bone());
 
             using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
             {
@@ -179,7 +165,7 @@ namespace M2Export
             
 
             var wowTexture = new M2Texture();
-            wowTexture.Name = filename;
+            wowTexture.Name = filename;//TODO replace extension by BLP
             if(wrapU) wowTexture.Flags |= M2Texture.TextureFlags.WrapX;
             if(wrapV) wowTexture.Flags |= M2Texture.TextureFlags.WrapY;
             wowTexture.Type = M2Texture.TextureType.Skin;
@@ -187,44 +173,8 @@ namespace M2Export
             wowTextures.Add(wowTexture);
         }
 
-        private static void ExtractMesh(MObject meshNode, M2SkinProfile wowView, ICollection<M2Vertex> globalVertices)
+        private static void ExtractMeshPolygons(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView)
         {
-            var mesh = new MFnMesh(meshNode);// Always ok when iterating on meshes only
-            var wowMesh = new M2SkinSection();
-            //nStartVertex + MayaIndex = ViewIndex
-
-            // VERTICES
-            var vertexPositions = new MFloatPointArray();// Each vertex will be refered as its index into these lists.
-            var vertexNormals = new MFloatVectorArray();
-            mesh.getPoints(vertexPositions);
-            mesh.getVertexNormals(false, vertexNormals);
-            //TODO Generate CenterMass, CenterBoundingBox, Radius
-
-            wowMesh.StartVertex = (ushort)wowView.Indices.Count;//TODO Check level for big models, like character models with lots of triangles
-            var vertexIter = new MItMeshVertex(meshNode);
-            while (!vertexIter.isDone)
-            {
-                var mayaVertexPosition = vertexPositions[vertexIter.index()];
-                var mayaVertexNormal = vertexNormals[vertexIter.index()];
-                var mayaVertexUv = new float[2];
-                vertexIter.getUV(mayaVertexUv);
-                //TODO multiple textures per mesh. Maybe with getUVSets which gives multiple arrays of u and v you can index with vertex id ?
-
-                var wowVertex = new M2Vertex();
-                //Here I fix the axis
-                wowVertex.Position = new C3Vector(mayaVertexPosition.x, mayaVertexPosition.z, mayaVertexPosition.y);
-                wowVertex.Normal = new C3Vector(mayaVertexNormal.x, mayaVertexNormal.z, mayaVertexNormal.y);
-                wowVertex.TexCoords[0] = new C2Vector(mayaVertexUv[0], mayaVertexUv[1]);
-                //TODO things in vertex : boneWeights, boneIndices. Maybe in maya skinClusters ?
-
-                wowMesh.NVertices++;
-                wowView.Indices.Add((ushort)globalVertices.Count);//All of this to do the wow Vertex mapping mesh->view->global
-                globalVertices.Add(wowVertex);
-
-                vertexIter.next();
-            }
-
-            // POLYGONS
             wowMesh.StartTriangle = (ushort)wowView.Triangles.Count;//TODO Check level for big models
 
             var polygonIter = new MItMeshPolygon(meshNode);
@@ -235,14 +185,104 @@ namespace M2Export
                 polygonIter.getTriangles(points, vertexList);
                 foreach (var index in vertexList)
                 {
-                    wowView.Triangles.Add((ushort)(index + wowMesh.StartVertex));//Added StartVertex so the index become View relative and no Mesh relative. TODO level here too ?
+                    wowView.Triangles.Add((ushort)(wowMesh.StartVertex + index));//Added StartVertex so the index become View relative and no Mesh relative. TODO level here too ?
                     wowMesh.NTriangles++;
                 }
 
                 polygonIter.next();
             }
+        }
+        // ReSharper disable once SuggestBaseTypeForParameter
+        private static ushort ExtractMeshWeights(out float[][] vertexBoneWeights, out uint[][] vertexBoneIndices, MFnMesh mesh)
+        {
+            ushort boneInfluences = 0;
+            vertexBoneWeights = null;
+            vertexBoneIndices = null;
+            var inMeshPlug = mesh.findPlug("inMesh");
+            if (!inMeshPlug.isConnected) return boneInfluences;
+            var dgIt = new MItDependencyGraph(inMeshPlug);
+            while (!dgIt.isDone)
+            {
+                var thisNode = dgIt.thisNode();
+                if (!thisNode.hasFn(MFn.Type.kSkinClusterFilter))
+                {
+                    var skinCluster = new MFnSkinCluster(thisNode);
+                    var weightListPlug = skinCluster.findPlug("weightList");
+                    vertexBoneWeights = new float[weightListPlug.numElements][];
+                    vertexBoneIndices = new uint[weightListPlug.numElements][];
+                    for (uint i = 0; i < weightListPlug.numElements; i++)//for each vertex
+                    {
+                        var weightPlug = weightListPlug.elementByPhysicalIndex(i).child(0);
+                        if(weightPlug.numElements > 4) throw new Exception("A vertex is influenced by "+weightPlug.numElements+". The maximum is 4.");
+                        if (weightPlug.numElements > boneInfluences)
+                            boneInfluences = (ushort) weightPlug.numElements;//M2SkinSection.BoneInfluences
+                        vertexBoneWeights[i] = new float[4];
+                        vertexBoneIndices[i] = new uint[4];
+                        for (uint j = 0; j < weightPlug.numElements; j++)//for each weight
+                        {
+                            weightPlug.elementByPhysicalIndex(j).getValue(vertexBoneWeights[i][j]);
+                            vertexBoneIndices[i][j] = weightPlug.elementByPhysicalIndex(j).logicalIndex;
+                        }
+                    }
 
-            wowView.Submeshes.Add(wowMesh);
+                }
+                dgIt.next();
+            }
+            return boneInfluences;
+        }
+
+        private static void ExtractMeshVertices(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView,
+            ICollection<M2Vertex> globalVertices)
+        {
+            var mesh = new MFnMesh(meshNode);
+
+            var vertexPositions = new MFloatPointArray();// Each vertex will be refered as its index into these lists.
+            var vertexNormals = new MFloatVectorArray();
+            var vertexUs = new MFloatArray();
+            var vertexVs = new MFloatArray();
+            float[][] vertexBoneWeights;
+            uint[][] vertexBoneIndices;
+            mesh.getPoints(vertexPositions);
+            mesh.getVertexNormals(false, vertexNormals);
+            mesh.getUVs(vertexUs, vertexVs);
+            wowMesh.BoneInfluences = ExtractMeshWeights(out vertexBoneWeights, out vertexBoneIndices, mesh);
+            //TODO Generate CenterMass, CenterBoundingBox, Radius
+
+            wowMesh.StartVertex = (ushort)wowView.Indices.Count;//TODO Check level for big models, like character models with lots of triangles
+            wowMesh.NVertices = (ushort) mesh.numVertices;
+            for (var i = 0; i < mesh.numVertices; i++)
+            {
+                //There is a fix with the axis for positions, normals (z/y inversion) and uv.
+                var wowVertex = new M2Vertex();
+
+                var mayaVertexPosition = vertexPositions[i];
+                wowVertex.Position = new C3Vector(mayaVertexPosition.x, mayaVertexPosition.z, mayaVertexPosition.y);
+                var mayaVertexNormal = vertexNormals[i];
+                wowVertex.Normal = new C3Vector(mayaVertexNormal.x, mayaVertexNormal.z, mayaVertexNormal.y);
+                wowVertex.TexCoords[0] = new C2Vector(vertexUs[i], 1.0F - vertexVs[i]);
+                //TODO multiple textures per mesh. Maybe with getUVSets which gives multiple arrays of u and v you can index with vertex id ?
+                if (vertexBoneIndices != null)
+                {
+                    for (var j = 0; j < vertexBoneIndices[i].Length; j++)
+                        wowVertex.BoneIndices[j] = (byte) vertexBoneIndices[i][j];
+                }
+                if (vertexBoneWeights != null)
+                {
+                    for (var j = 0; j < vertexBoneWeights[i].Length; j++)
+                        wowVertex.BoneWeights[j] = (byte) (vertexBoneWeights[i][j] * byte.MaxValue);
+                }
+
+                wowView.Indices.Add((ushort)globalVertices.Count);//All of this to do the wow Vertex mapping mesh->view->global
+                globalVertices.Add(wowVertex);
+            }
+        }
+
+        private static void ExtractMesh(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView, ICollection<M2Vertex> globalVertices)
+        {
+            // nStartVertex + MayaIndex = ViewIndex
+            // VERTICES
+            ExtractMeshVertices(meshNode, wowMesh, wowView, globalVertices);
+            ExtractMeshPolygons(meshNode, wowMesh, wowView);
         }
     }
 }
