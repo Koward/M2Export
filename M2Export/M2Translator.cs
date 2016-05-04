@@ -66,19 +66,53 @@ namespace M2Export
 
             var wowModel = new M2();
             wowModel.Name = file.rawName.Substring(0, file.rawName.Length - 3);// Name is fileName without .m2 extension
-            var wowView = new M2SkinProfile();
+
 
             MGlobal.displayInfo("Building model " + wowModel.Name);
 
-            var boneIds = new Dictionary<MDagPath, int>();//Maps a joint MDagPath to the WoW bone index in the global bone list.
+            ExtractJoints(wowModel.Bones);
+            ExtractTextures(wowModel.Textures);
 
-            // JOINTS
-            var jointIter = new MItDependencyNodes(MFn.Type.kJoint);
+            //Temporary TODO proper boneLookup along with multiple views
+            for(short i = 0; i < wowModel.Bones.Count; i++) wowModel.BoneLookup.Add(i);
+
+            var wowView = new M2SkinProfile();//TODO multiple views ?
+            ExtractMeshes(wowView, wowModel.GlobalVertexList);
+            wowModel.Views.Add(wowView);
+
+            //Static models requirements
+            if(wowModel.Materials.Count == 0) wowModel.Materials.Add(new M2Material());
+            if(wowModel.Sequences.Count == 0) wowModel.Sequences.Add(new M2Sequence());//For non-animated models, basic "Stand"
+            if(wowModel.Bones.Count == 0) wowModel.Bones.Add(new M2Bone());//For jointless static models
+
+            using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
+            {
+                wowModel.Save(writer, M2.Format.Classic); //TODO Choose version at output ?
+            }
+            MGlobal.displayInfo("Done.");
+        }
+
+        private static void ExtractJoints(ICollection<M2Bone> bones)
+        {
+            var boneRefs = new Dictionary<string, M2Bone>();//Maps a joint name to the WoW bone instance.
+            var boneIds = new Dictionary<M2Bone, short>();//Maps a bone to its index
+            var jointIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kJoint);
+            while (!jointIter.isDone)//Create an M2Bone for all Joints.
+            {
+                var wowBone = new M2Bone();
+                boneIds[wowBone] = (short) bones.Count;
+                boneRefs[jointIter.fullPathName] = wowBone;
+                bones.Add(wowBone);
+                jointIter.next();
+            }
+
+            jointIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kJoint);//Reset the iterator
             while(!jointIter.isDone)
             {
-                var mayaObject = jointIter.thisNode;
-                var joint = new MFnIkJoint(mayaObject);
-                var wowBone = new M2Bone();
+                var jointPath = new MDagPath();
+                jointIter.getPath(jointPath);
+                var joint = new MFnIkJoint(jointPath);
+                var wowBone = boneRefs[jointIter.fullPathName];
                 var mayaPivot = joint.rotatePivot(MSpace.Space.kTransform);
                 wowBone.Pivot = new C3Vector((float) mayaPivot.x, (float) mayaPivot.y, (float) mayaPivot.z);
 
@@ -93,84 +127,48 @@ namespace M2Export
                 }
                 else
                 {
-                    wowBone.ParentBone = (short) boneIds[new MFnDagNode(joint.parent(0)).dagPath];
+                    var parentPath = new MFnIkJoint(joint.parent(0)).fullPathName;
+                    if(!boneRefs.ContainsKey(parentPath)) {
+                        foreach (var path in boneRefs.Keys)
+                            MGlobal.displayInfo("\t"+path+"\n");
+                    }
+                    wowBone.ParentBone = boneIds[boneRefs[parentPath]];
                     wowBone.KeyBoneId = M2Bone.KeyBone.Other;
                     //TODO wowBone.KeyBoneId. Maybe with a special name the user sets ?
                     //Note : M2Bone.submesh_id is wrong in the wiki. Do not try to compute it.
                 }
-                boneIds[joint.dagPath] = wowModel.Bones.Count;
-                wowModel.Bones.Add(wowBone);
-
                 jointIter.next();
             }
-            //Temporary TODO proper boneLookup
-            for(short i = 0; i < wowModel.Bones.Count; i++) wowModel.BoneLookup.Add(i);
-
-            var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
-            while (!meshIter.isDone)
-            {
-                var wowMesh = new M2SkinSection();
-                wowMesh.SubmeshId = 0;//TODO give a unique ID maybe ?
-                ExtractMesh(meshIter.thisNode, wowMesh, wowView, wowModel.GlobalVertexList);
-
-                // BONE LINKING TODO
-                for (int i = wowMesh.StartVertex; i < wowMesh.StartVertex + wowMesh.NVertices; i++)
-                {
-                    var vert = wowModel.GlobalVertexList[wowView.Indices[i]];
-                    wowView.Properties.Add(new VertexProperty(vert.BoneIndices));//Assumes index in bones == index in boneLookup TODO change it
-                }
-
-                wowView.Submeshes.Add(wowMesh);
-                meshIter.next();
-            }
-
-            // TEXTURES
-            var texNodesIter = new MItDependencyNodes(MFn.Type.kFileTexture);
-            while (!texNodesIter.isDone)
-            {
-                var texNode = texNodesIter.thisNode;
-                ExtractTexture(texNode, wowModel.Textures);
-                texNodesIter.next();
-            }
-
-            wowModel.Views.Add(wowView);
-
-            // OTHER
-
-            if(wowModel.Materials.Count == 0) wowModel.Materials.Add(new M2Material());
-            if(wowModel.Sequences.Count == 0) wowModel.Sequences.Add(new M2Sequence());
-            if(wowModel.Bones.Count == 0) wowModel.Bones.Add(new M2Bone());
-
-            using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
-            {
-                wowModel.Save(writer, M2.Format.Classic); //TODO Choose version at output ?
-            }
-            MGlobal.displayInfo("Done.");
         }
 
-        private static void ExtractTexture(MObject texNode, M2Array<M2Texture> wowTextures)
+        private static void ExtractTextures(ICollection<M2Texture> wowTextures)
         {
-            var dependencyTexNode = new MFnDependencyNode(texNode);
+            var texIter = new MItDependencyNodes(MFn.Type.kFileTexture);
+            while (!texIter.isDone)
+            {
+                var dependencyTexNode = new MFnDependencyNode(texIter.thisNode);
 
-            //Get attributes
-            var fileNamePlug = dependencyTexNode.findPlug("fileTextureName");
-            string filename;
-            fileNamePlug.getValue(out filename);
-            var wrapUPlug = dependencyTexNode.findPlug("wrapU");
-            var wrapU = false;
-            wrapUPlug.getValue(ref wrapU);
-            var wrapVPlug = dependencyTexNode.findPlug("wrapV");
-            var wrapV = false;
-            wrapVPlug.getValue(ref wrapV);
-            
+                //Get attributes
+                var fileNamePlug = dependencyTexNode.findPlug("fileTextureName");
+                string filename;
+                fileNamePlug.getValue(out filename);
+                var wrapUPlug = dependencyTexNode.findPlug("wrapU");
+                var wrapU = false;
+                wrapUPlug.getValue(ref wrapU);
+                var wrapVPlug = dependencyTexNode.findPlug("wrapV");
+                var wrapV = false;
+                wrapVPlug.getValue(ref wrapV);
+                
 
-            var wowTexture = new M2Texture();
-            wowTexture.Name = filename;//TODO replace extension by BLP
-            if(wrapU) wowTexture.Flags |= M2Texture.TextureFlags.WrapX;
-            if(wrapV) wowTexture.Flags |= M2Texture.TextureFlags.WrapY;
-            wowTexture.Type = M2Texture.TextureType.Skin;
-            //TODO Type, identification with name ?
-            wowTextures.Add(wowTexture);
+                var wowTexture = new M2Texture();
+                wowTexture.Name = filename;//TODO replace extension by BLP
+                if(wrapU) wowTexture.Flags |= M2Texture.TextureFlags.WrapX;
+                if(wrapV) wowTexture.Flags |= M2Texture.TextureFlags.WrapY;
+                wowTexture.Type = M2Texture.TextureType.Skin;
+                //TODO Type, identification with name ?
+                wowTextures.Add(wowTexture);
+                texIter.next();
+            }
         }
 
         private static void ExtractMeshPolygons(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView)
@@ -234,6 +232,7 @@ namespace M2Export
         private static void ExtractMeshVertices(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView,
             ICollection<M2Vertex> globalVertices)
         {
+            // nStartVertex + MayaIndex = ViewIndex
             var mesh = new MFnMesh(meshNode);
 
             var vertexPositions = new MFloatPointArray();// Each vertex will be refered as its index into these lists.
@@ -277,12 +276,114 @@ namespace M2Export
             }
         }
 
-        private static void ExtractMesh(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView, ICollection<M2Vertex> globalVertices)
+        private static void ExtractMeshes(M2SkinProfile wowView, IList<M2Vertex> globalVertices)
         {
-            // nStartVertex + MayaIndex = ViewIndex
-            // VERTICES
-            ExtractMeshVertices(meshNode, wowMesh, wowView, globalVertices);
-            ExtractMeshPolygons(meshNode, wowMesh, wowView);
+            var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
+            while (!meshIter.isDone)
+            {
+                var wowMesh = new M2SkinSection();
+                wowMesh.SubmeshId = 0;//TODO give a unique ID maybe ?
+                ExtractMeshVertices(meshIter.thisNode, wowMesh, wowView, globalVertices);
+                ExtractMeshPolygons(meshIter.thisNode, wowMesh, wowView);
+
+                // BONE LINKING TODO when proper boneLookup will be done
+                for (int i = wowMesh.StartVertex; i < wowMesh.StartVertex + wowMesh.NVertices; i++)
+                {
+                    var vert = globalVertices[wowView.Indices[i]];
+                    wowView.Properties.Add(new VertexProperty(vert.BoneIndices));//Assumes index in bones == index in boneLookup TODO change it
+                }
+
+                wowView.Submeshes.Add(wowMesh);
+                ExtractMeshShaders(meshIter.thisNode);//TODO Debug printing of shaders
+                meshIter.next();
+            }
         }
+
+
+        /// <summary>
+        /// Originally written in C++ by RobTheBloke. 
+        /// See https://nccastaff.bournemouth.ac.uk/jmacey/RobTheBloke/www/research/maya/mfnmesh.htm
+        /// </summary>
+        /// <param name="shadingEngine"></param>
+        /// <returns>The shader name.</returns>
+        private static string GetShaderName(MObject shadingEngine)
+        {
+            // attach a function set to the shading engine
+            var fn = new MFnDependencyNode(shadingEngine);
+
+            // get access to the surfaceShader attribute. This will be connected to
+            // lambert , phong nodes etc.
+            var sShader = fn.findPlug("surfaceShader");
+
+            // will hold the connections to the surfaceShader attribute
+            var materials = new MPlugArray();
+
+            // get the material connected to the surface shader
+            sShader.connectedTo(materials, true, false);
+
+            if (materials.Count <= 0) return "none";
+            // if we found a material
+            var fnMat = new MFnDependencyNode(materials[0].node);
+            return fnMat.name;
+        }
+
+
+        private static void ExtractMeshShaders(MObject mesh)
+        {
+            var fnMesh = new MFnMesh(mesh);
+
+            // get the number of instances
+            var numInstances = fnMesh.parentCount;
+
+            // loop through each instance of the mesh
+            for (uint i = 0; i < numInstances; ++i)
+            {
+                // attach a function set to this instances parent transform
+                var fn = new MFnDependencyNode(fnMesh.parent(i));
+
+                // this will hold references to the shaders used on the meshes
+                var shaders = new MObjectArray();
+
+                // this is used to hold indices to the materials returned in the object array
+                var faceIndices = new MIntArray();
+
+                // get the shaders used by the i'th mesh instance
+                fnMesh.getConnectedShaders(i, shaders, faceIndices);
+
+                switch (shaders.length)
+                {
+                    // if no shader applied to the mesh instance
+                    case 0:
+                        break;
+                    // if all faces use the same material
+                    case 1:
+                        var shaderName = GetShaderName(shaders[0]);//example : lambert1
+                        var texUnit = new M2Batch();
+                        texUnit.Flags = 16;
+                        //TODO Shader
+                        break;
+                    default:
+                        // i'm going to sort the face indicies into groups based on
+                        // the applied material - might as well... ;)
+                        // also, set to same size as num of shaders
+                        var facesByMatId = new List<List<int>>((int) shaders.length);
+
+                        // put face index into correct array
+                        for (var j = 0; j < faceIndices.length; ++j)
+                        {
+                            facesByMatId[faceIndices[j]].Add(j);
+                        }
+
+                        // now write each material and the face indices that use them
+                        for (var j = 0; j < shaders.length; ++j)
+                        {
+                            var thisShaderName = GetShaderName(shaders[j]);
+                            MGlobal.displayInfo(thisShaderName + " " + facesByMatId[j].Count);
+                        }
+                        throw new NotImplementedException("Cannot handle more than one shader per mesh.");
+                }
+            }
+        }
+
     }
 }
