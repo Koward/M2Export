@@ -67,18 +67,14 @@ namespace M2Export
             var wowModel = new M2();
             wowModel.Name = file.rawName.Substring(0, file.rawName.Length - 3);// Name is fileName without .m2 extension
 
-
             MGlobal.displayInfo("Building model " + wowModel.Name);
 
             ExtractJoints(wowModel.Bones);
-            ExtractTextures(wowModel.Textures);
+            ExtractTextures(wowModel);
 
-            //Temporary TODO proper boneLookup along with multiple views
-            for(short i = 0; i < wowModel.Bones.Count; i++) wowModel.BoneLookup.Add(i);
-
-            var wowView = new M2SkinProfile();//TODO multiple views ?
-            ExtractMeshes(wowView, wowModel.GlobalVertexList);
-            wowModel.Views.Add(wowView);
+            var wowView = new M2SkinProfile();//TODO multiple views by decimating ?
+            wowModel.Views.Add(wowView);//Because later in the code it always refers to wowModel.Views[0] since it's the only one we do.
+            ExtractMeshes(wowModel);
 
             //Static models requirements
             if(wowModel.Materials.Count == 0) wowModel.Materials.Add(new M2Material());
@@ -87,7 +83,7 @@ namespace M2Export
 
             using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
             {
-                wowModel.Save(writer, M2.Format.Classic); //TODO Choose version at output ?
+                wowModel.Save(writer, M2.Format.LichKing); //TODO Choose version at output ?
             }
             MGlobal.displayInfo("Done.");
         }
@@ -141,8 +137,9 @@ namespace M2Export
             }
         }
 
-        private static void ExtractTextures(ICollection<M2Texture> wowTextures)
+        private static void ExtractTextures(M2 wowModel)
         {
+            var wowTextures = wowModel.Textures;
             var texIter = new MItDependencyNodes(MFn.Type.kFileTexture);
             while (!texIter.isDone)
             {
@@ -167,6 +164,7 @@ namespace M2Export
                 wowTexture.Type = M2Texture.TextureType.Skin;
                 //TODO Type, identification with name ?
                 wowTextures.Add(wowTexture);
+                wowModel.TexLookup.Add((short) (wowTextures.Count - 1));
                 texIter.next();
             }
         }
@@ -202,7 +200,7 @@ namespace M2Export
             while (!dgIt.isDone)
             {
                 var thisNode = dgIt.thisNode();
-                if (!thisNode.hasFn(MFn.Type.kSkinClusterFilter))
+                if (thisNode.hasFn(MFn.Type.kSkinClusterFilter))
                 {
                     var skinCluster = new MFnSkinCluster(thisNode);
                     var weightListPlug = skinCluster.findPlug("weightList");
@@ -276,8 +274,10 @@ namespace M2Export
             }
         }
 
-        private static void ExtractMeshes(M2SkinProfile wowView, IList<M2Vertex> globalVertices)
+        private static void ExtractMeshes(M2 wowModel)
         {
+            var wowView = wowModel.Views[0];
+            var globalVertices = wowModel.GlobalVertexList;
             var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
             while (!meshIter.isDone)
             {
@@ -286,15 +286,32 @@ namespace M2Export
                 ExtractMeshVertices(meshIter.thisNode, wowMesh, wowView, globalVertices);
                 ExtractMeshPolygons(meshIter.thisNode, wowMesh, wowView);
 
-                // BONE LINKING TODO when proper boneLookup will be done
+                // BONE LOOKUP LINKING
+                wowMesh.StartBones = (ushort) wowModel.BoneLookup.Count;
                 for (int i = wowMesh.StartVertex; i < wowMesh.StartVertex + wowMesh.NVertices; i++)
                 {
                     var vert = globalVertices[wowView.Indices[i]];
-                    wowView.Properties.Add(new VertexProperty(vert.BoneIndices));//Assumes index in bones == index in boneLookup TODO change it
+                    var realIndices = vert.BoneIndices;
+                    var boneRealToLookup = new Dictionary<int, int>();//Reverse lookup
+                    for (var j = 0; j < realIndices.Length && realIndices[j] != 0; j++)
+                    {
+                        var refBoneIndex = realIndices[j];//Some index into the M2Bone list.
+                        boneRealToLookup[refBoneIndex] = wowModel.BoneLookup.Count;
+                        wowModel.BoneLookup.Add(refBoneIndex);
+                        wowMesh.NBones++;
+                    }
+                    var lookupIndices = new byte[]
+                    {
+                        (byte) boneRealToLookup[realIndices[0]],
+                        (byte) boneRealToLookup[realIndices[1]],
+                        (byte) boneRealToLookup[realIndices[2]],
+                        (byte) boneRealToLookup[realIndices[3]]
+                    };
+                    wowView.Properties.Add(new VertexProperty(lookupIndices));
                 }
 
                 wowView.Submeshes.Add(wowMesh);
-                ExtractMeshShaders(meshIter.thisNode);//TODO Debug printing of shaders
+                ExtractMeshShaders(meshIter.thisNode, wowModel);//TODO Debug printing of shaders
                 meshIter.next();
             }
         }
@@ -328,8 +345,9 @@ namespace M2Export
         }
 
 
-        private static void ExtractMeshShaders(MObject mesh)
+        private static void ExtractMeshShaders(MObject mesh, M2 wowModel)
         {
+            var wowView = wowModel.Views[0];
             var fnMesh = new MFnMesh(mesh);
 
             // get the number of instances
@@ -360,6 +378,19 @@ namespace M2Export
                         var shaderName = GetShaderName(shaders[0]);//example : lambert1
                         var texUnit = new M2Batch();
                         texUnit.Flags = 16;
+
+                        var material = new M2Material();
+                        wowModel.Materials.Add(material);
+                        texUnit.RenderFlags = (ushort) (wowModel.Materials.Count - 1);
+
+                        var transparency = new M2TextureWeight();
+                        transparency.Weight.Timestamps.Add(new M2Array<uint> {0});
+                        transparency.Weight.Values.Add(new M2Array<FixedPoint_0_15> {new FixedPoint_0_15(32767)});
+                        wowModel.Transparencies.Add(transparency);
+                        texUnit.Transparency = (ushort) (wowModel.Transparencies.Count - 1);
+                        wowModel.TransLookup.Add((short) (wowModel.Transparencies.Count - 1));
+
+                        wowView.TextureUnits.Add(texUnit);
                         //TODO Shader
                         break;
                     default:
