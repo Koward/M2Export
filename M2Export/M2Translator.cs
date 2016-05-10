@@ -13,6 +13,7 @@ namespace M2Export
     public class M2Translator : MPxFileTranslator
     {
         protected static string FExtension = "m2";
+        protected static M2.Format WoWVersion = M2.Format.Classic;
 
         public override string defaultExtension()
         {
@@ -83,36 +84,32 @@ namespace M2Export
 
             using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
             {
-                wowModel.Save(writer, M2.Format.LichKing); //TODO Choose version at output ?
+                wowModel.Save(writer, WoWVersion); //TODO Choose version at output ?
             }
             MGlobal.displayInfo("Done.");
         }
 
+        /// <summary>
+        /// Creates the bone hierarchy.
+        /// </summary>
+        /// <param name="bones"></param>
         private static void ExtractJoints(ICollection<M2Bone> bones)
         {
             var boneRefs = new Dictionary<string, M2Bone>();//Maps a joint name to the WoW bone instance.
             var boneIds = new Dictionary<M2Bone, short>();//Maps a bone to its index
+            //Depth First => parent always processed before child
             var jointIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kJoint);
             while (!jointIter.isDone)//Create an M2Bone for all Joints.
             {
                 var wowBone = new M2Bone();
                 boneIds[wowBone] = (short) bones.Count;
                 boneRefs[jointIter.fullPathName] = wowBone;
-                bones.Add(wowBone);
-                jointIter.next();
-            }
 
-            jointIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kJoint);//Reset the iterator
-            while(!jointIter.isDone)
-            {
                 var jointPath = new MDagPath();
                 jointIter.getPath(jointPath);
                 var joint = new MFnIkJoint(jointPath);
-                var wowBone = boneRefs[jointIter.fullPathName];
-                var mayaPivot = joint.rotatePivot(MSpace.Space.kTransform);
-                wowBone.Pivot = new C3Vector((float) mayaPivot.x, (float) mayaPivot.y, (float) mayaPivot.z);
 
-                //Bone parenting
+                MVector mayaPivot;
                 var isRoot = false;
                 if (joint.parentCount == 0) isRoot = true;
                 else if (!joint.parent(0).hasFn(MFn.Type.kJoint)) isRoot = true;
@@ -120,19 +117,21 @@ namespace M2Export
                 {
                     wowBone.ParentBone = -1;
                     wowBone.KeyBoneId = M2Bone.KeyBone.Root;
+                    mayaPivot = joint.getTranslation(MSpace.Space.kObject);
                 }
                 else
                 {
                     var parentPath = new MFnIkJoint(joint.parent(0)).fullPathName;
-                    if(!boneRefs.ContainsKey(parentPath)) {
-                        foreach (var path in boneRefs.Keys)
-                            MGlobal.displayInfo("\t"+path+"\n");
-                    }
                     wowBone.ParentBone = boneIds[boneRefs[parentPath]];
                     wowBone.KeyBoneId = M2Bone.KeyBone.Other;
                     //TODO wowBone.KeyBoneId. Maybe with a special name the user sets ?
                     //Note : M2Bone.submesh_id is wrong in the wiki. Do not try to compute it.
+                    var parentPivot = new MFnIkJoint(joint.parent(0)).getTranslation(MSpace.Space.kObject);
+                    mayaPivot = parentPivot + joint.getTranslation(MSpace.Space.kObject);
                 }
+                wowBone.Pivot = new C3Vector((float) mayaPivot.x, (float) mayaPivot.y, (float) mayaPivot.z);
+
+                bones.Add(wowBone);
                 jointIter.next();
             }
         }
@@ -158,38 +157,96 @@ namespace M2Export
                 
 
                 var wowTexture = new M2Texture();
-                wowTexture.Name = filename;//TODO replace extension by BLP
+                wowTexture.Type = M2Texture.TextureType.MonsterSkin1;
+                //TODO hardcoded textures
+                //if()
+                //wowTexture.Name = filename;//TODO replace extension by BLP
+                //else
+
                 if(wrapU) wowTexture.Flags |= M2Texture.TextureFlags.WrapX;
                 if(wrapV) wowTexture.Flags |= M2Texture.TextureFlags.WrapY;
-                wowTexture.Type = M2Texture.TextureType.Skin;
                 //TODO Type, identification with name ?
                 wowTextures.Add(wowTexture);
-                wowModel.TexLookup.Add((short) (wowTextures.Count - 1));
+                wowModel.TexLookup.Add((short) (wowTextures.Count - 1));//TODO check it
                 texIter.next();
             }
         }
 
-        private static void ExtractMeshPolygons(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView)
+        /// <summary>
+        /// Faces and vertices UVs, positions and normals.
+        /// </summary>
+        /// <param name="meshNode"></param>
+        /// <param name="wowMesh"></param>
+        /// <param name="wowView"></param>
+        /// <param name="globalVertices"></param>
+        private static void ExtractMeshData(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView, List<M2Vertex> globalVertices)
         {
-            wowMesh.StartTriangle = (ushort)wowView.Triangles.Count;//TODO Check level for big models
+            // Extract mesh data tables
+            //UV Sets
+            var uvsets = new MStringArray();
+            var meshFunctions = new MFnMesh(meshNode);
+            meshFunctions.getUVSetNames(uvsets);
+            //Bone Weights
+            float[][] vertexBoneWeights;
+            uint[][] vertexBoneIndices;
+            wowMesh.BoneInfluences = GetMeshWeights(out vertexBoneWeights, out vertexBoneIndices, meshFunctions);
+            var hasBoneWeights = vertexBoneIndices != null && vertexBoneWeights != null;
 
+            wowMesh.StartTriangle = (ushort)wowView.Triangles.Count;//TODO Check level for big models
             var polygonIter = new MItMeshPolygon(meshNode);
             while (!polygonIter.isDone)
             {
+                //Triangles
                 var points = new MPointArray();// Unused
                 var vertexList = new MIntArray();
-                polygonIter.getTriangles(points, vertexList);
+                polygonIter.getTriangles(points, vertexList);//3 if triangle, 6 if quad..
                 foreach (var index in vertexList)
                 {
-                    wowView.Triangles.Add((ushort)(wowMesh.StartVertex + index));//Added StartVertex so the index become View relative and no Mesh relative. TODO level here too ?
+                    //the index become View relative and no Mesh relative. 
+                    //TODO level here too ?
+                    wowView.Triangles.Add((ushort)(wowMesh.StartVertex + index));
                     wowMesh.NTriangles++;
+                }
+
+                //for each vertex in the face. If the face is not a triangle, there will be too many iterations, but it should work.
+                for (var i = 0; i < polygonIter.polygonVertexCount(); i++)//i = faceRelativeIndex
+                {
+                    var meshRelativeIndex = (int) polygonIter.vertexIndex(i);
+                    var wowVertex = globalVertices[wowView.Indices[wowMesh.StartVertex + meshRelativeIndex]];
+                    //UV coordinates
+                    if (uvsets.length <= 0 || meshFunctions.numUVs(uvsets[0]) <= 0) continue;
+                    for (var j = 0; j < uvsets.length && j < 2; j++) //i < 2 as WoW M2Vertex support limits
+                    {
+                        var uvCoords = new float[2];
+                        polygonIter.getUV(i, uvCoords, uvsets[j]);
+                        //TODO check if axis inversion needed
+                        wowVertex.TexCoords[j] = new C2Vector(uvCoords[0], uvCoords[1]);
+                    }
+
+                    //Bone weights
+                    if (hasBoneWeights)
+                    {
+                        for (var j = 0; j < vertexBoneIndices[meshRelativeIndex].Length; j++)
+                            wowVertex.BoneIndices[j] = (byte) vertexBoneIndices[meshRelativeIndex][j];
+                        for (var j = 0; j < vertexBoneWeights[meshRelativeIndex].Length; j++)
+                            wowVertex.BoneWeights[j] = (byte) (vertexBoneWeights[meshRelativeIndex][j] * byte.MaxValue);
+                    }
+
+                    //Pos&Normal. Notice the axis changing between Maya and WoW
+                    var position = polygonIter.point(i);
+                    wowVertex.Position = new C3Vector((float) position.x, (float) position.z, (float) position.y);
+                    var normal = new MVector();
+                    polygonIter.getNormal((uint) i, normal);
+                    wowVertex.Normal = new C3Vector((float) normal[0], (float) normal[2], (float) normal[1]);
+
+                    //TODO Generate CenterMass, CenterBoundingBox, Radius
                 }
 
                 polygonIter.next();
             }
         }
-        // ReSharper disable once SuggestBaseTypeForParameter
-        private static ushort ExtractMeshWeights(out float[][] vertexBoneWeights, out uint[][] vertexBoneIndices, MFnMesh mesh)
+
+        private static ushort GetMeshWeights(out float[][] vertexBoneWeights, out uint[][] vertexBoneIndices, MFnMesh mesh)
         {
             ushort boneInfluences = 0;
             vertexBoneWeights = null;
@@ -227,50 +284,50 @@ namespace M2Export
             return boneInfluences;
         }
 
-        private static void ExtractMeshVertices(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView,
-            ICollection<M2Vertex> globalVertices)
+        /// <summary>
+        /// Do the creation and lookup mapping of vertices. Data is added later to them, in ExtractMeshData.
+        /// Here WoW vertices instances are created.
+        /// </summary>
+        /// <param name="meshNode"></param>
+        /// <param name="wowMesh"></param>
+        /// <param name="wowModel"></param>
+        private static void MeshDataMapping(MObject meshNode, M2SkinSection wowMesh, M2 wowModel)
         {
-            // nStartVertex + MayaIndex = ViewIndex
+            var wowView = wowModel.Views[0];
+            var globalVertices = wowModel.GlobalVertexList;
             var mesh = new MFnMesh(meshNode);
 
-            var vertexPositions = new MFloatPointArray();// Each vertex will be refered as its index into these lists.
-            var vertexNormals = new MFloatVectorArray();
-            var vertexUs = new MFloatArray();
-            var vertexVs = new MFloatArray();
-            float[][] vertexBoneWeights;
-            uint[][] vertexBoneIndices;
-            mesh.getPoints(vertexPositions);
-            mesh.getVertexNormals(false, vertexNormals);
-            mesh.getUVs(vertexUs, vertexVs);
-            wowMesh.BoneInfluences = ExtractMeshWeights(out vertexBoneWeights, out vertexBoneIndices, mesh);
-            //TODO Generate CenterMass, CenterBoundingBox, Radius
-
-            wowMesh.StartVertex = (ushort)wowView.Indices.Count;//TODO Check level for big models, like character models with lots of triangles
+            // WoW Vertex mapping mesh-> view-> global
+            // Note : nStartVertex + MayaIndex = ViewIndex
+            wowMesh.StartVertex = (ushort) wowView.Indices.Count;//TODO Check level for big models, like character models with lots of triangles
             wowMesh.NVertices = (ushort) mesh.numVertices;
             for (var i = 0; i < mesh.numVertices; i++)
             {
-                //There is a fix with the axis for positions, normals (z/y inversion) and uv.
                 var wowVertex = new M2Vertex();
-
-                var mayaVertexPosition = vertexPositions[i];
-                wowVertex.Position = new C3Vector(mayaVertexPosition.x, mayaVertexPosition.z, mayaVertexPosition.y);
-                var mayaVertexNormal = vertexNormals[i];
-                wowVertex.Normal = new C3Vector(mayaVertexNormal.x, mayaVertexNormal.z, mayaVertexNormal.y);
-                wowVertex.TexCoords[0] = new C2Vector(vertexUs[i], 1.0F - vertexVs[i]);
-                //TODO multiple textures per mesh. Maybe with getUVSets which gives multiple arrays of u and v you can index with vertex id ?
-                if (vertexBoneIndices != null)
-                {
-                    for (var j = 0; j < vertexBoneIndices[i].Length; j++)
-                        wowVertex.BoneIndices[j] = (byte) vertexBoneIndices[i][j];
-                }
-                if (vertexBoneWeights != null)
-                {
-                    for (var j = 0; j < vertexBoneWeights[i].Length; j++)
-                        wowVertex.BoneWeights[j] = (byte) (vertexBoneWeights[i][j] * byte.MaxValue);
-                }
-
-                wowView.Indices.Add((ushort)globalVertices.Count);//All of this to do the wow Vertex mapping mesh->view->global
+                wowView.Indices.Add((ushort) globalVertices.Count);
                 globalVertices.Add(wowVertex);
+            }
+
+            // Bone Lookup
+            wowMesh.StartBones = (ushort) wowModel.BoneLookup.Count;
+            for (int i = wowMesh.StartVertex; i < wowMesh.StartVertex + wowMesh.NVertices; i++)
+            {
+                var vert = globalVertices[wowView.Indices[i]];
+                var realIndices = vert.BoneIndices;
+                var boneRealToLookup = new Dictionary<int, int>();//Reverse lookup
+                for (var j = 0; j < realIndices.Length && realIndices[j] != 0; j++)
+                {
+                    var refBoneIndex = realIndices[j];//Some index into the M2Bone list.
+                    boneRealToLookup[refBoneIndex] = wowModel.BoneLookup.Count;
+                    wowModel.BoneLookup.Add(refBoneIndex);
+                    wowMesh.NBones++;
+                }
+                var lookupIndices = new byte[4];
+                for (var j = 0; j < realIndices.Length && realIndices[j] != 0; j++)
+                {
+                    lookupIndices[j] = (byte) boneRealToLookup[realIndices[j]];
+                }
+                wowView.Properties.Add(new VertexProperty(lookupIndices));
             }
         }
 
@@ -283,35 +340,11 @@ namespace M2Export
             {
                 var wowMesh = new M2SkinSection();
                 wowMesh.SubmeshId = 0;//TODO give a unique ID maybe ?
-                ExtractMeshVertices(meshIter.thisNode, wowMesh, wowView, globalVertices);
-                ExtractMeshPolygons(meshIter.thisNode, wowMesh, wowView);
-
-                // BONE LOOKUP LINKING
-                wowMesh.StartBones = (ushort) wowModel.BoneLookup.Count;
-                for (int i = wowMesh.StartVertex; i < wowMesh.StartVertex + wowMesh.NVertices; i++)
-                {
-                    var vert = globalVertices[wowView.Indices[i]];
-                    var realIndices = vert.BoneIndices;
-                    var boneRealToLookup = new Dictionary<int, int>();//Reverse lookup
-                    for (var j = 0; j < realIndices.Length && realIndices[j] != 0; j++)
-                    {
-                        var refBoneIndex = realIndices[j];//Some index into the M2Bone list.
-                        boneRealToLookup[refBoneIndex] = wowModel.BoneLookup.Count;
-                        wowModel.BoneLookup.Add(refBoneIndex);
-                        wowMesh.NBones++;
-                    }
-                    var lookupIndices = new byte[]
-                    {
-                        (byte) boneRealToLookup[realIndices[0]],
-                        (byte) boneRealToLookup[realIndices[1]],
-                        (byte) boneRealToLookup[realIndices[2]],
-                        (byte) boneRealToLookup[realIndices[3]]
-                    };
-                    wowView.Properties.Add(new VertexProperty(lookupIndices));
-                }
+                MeshDataMapping(meshIter.thisNode, wowMesh, wowModel);
+                ExtractMeshData(meshIter.thisNode, wowMesh, wowView, globalVertices);
 
                 wowView.Submeshes.Add(wowMesh);
-                ExtractMeshShaders(meshIter.thisNode, wowModel);//TODO Debug printing of shaders
+                ExtractMeshShaders(meshIter.thisNode, wowModel, (ushort) (wowView.Submeshes.Count - 1));
                 meshIter.next();
             }
         }
@@ -344,8 +377,7 @@ namespace M2Export
             return fnMat.name;
         }
 
-
-        private static void ExtractMeshShaders(MObject mesh, M2 wowModel)
+        private static void ExtractMeshShaders(MObject mesh, M2 wowModel, ushort meshNumber)
         {
             var wowView = wowModel.Views[0];
             var fnMesh = new MFnMesh(mesh);
@@ -357,7 +389,7 @@ namespace M2Export
             for (uint i = 0; i < numInstances; ++i)
             {
                 // attach a function set to this instances parent transform
-                var fn = new MFnDependencyNode(fnMesh.parent(i));
+                //var fn = new MFnDependencyNode(fnMesh.parent(i));
 
                 // this will hold references to the shaders used on the meshes
                 var shaders = new MObjectArray();
@@ -375,14 +407,19 @@ namespace M2Export
                         break;
                     // if all faces use the same material
                     case 1:
-                        var shaderName = GetShaderName(shaders[0]);//example : lambert1
+                        var shaderName = GetShaderName(shaders[0]);//example : lambert1. TODO find more names
+                        MGlobal.displayInfo("Detected material : "+shaderName);//TODO remove once handled
                         var texUnit = new M2Batch();
                         texUnit.Flags = 16;
+                        texUnit.SubmeshIndex = meshNumber;
 
+                        //TODO Extract Material data
                         var material = new M2Material();
+                        material.BlendMode = M2Material.BlendingMode.Mod;//lambert1
                         wowModel.Materials.Add(material);
                         texUnit.RenderFlags = (ushort) (wowModel.Materials.Count - 1);
 
+                        //TODO Extract Transparency data
                         var transparency = new M2TextureWeight();
                         transparency.Weight.Timestamps.Add(new M2Array<uint> {0});
                         transparency.Weight.Values.Add(new M2Array<FixedPoint_0_15> {new FixedPoint_0_15(32767)});
@@ -393,6 +430,7 @@ namespace M2Export
                         wowView.TextureUnits.Add(texUnit);
                         //TODO Shader
                         break;
+                    //Multiple materials, each applied only on some faces. 
                     default:
                         // i'm going to sort the face indicies into groups based on
                         // the applied material - might as well... ;)
@@ -411,10 +449,10 @@ namespace M2Export
                             var thisShaderName = GetShaderName(shaders[j]);
                             MGlobal.displayInfo(thisShaderName + " " + facesByMatId[j].Count);
                         }
+
                         throw new NotImplementedException("Cannot handle more than one shader per mesh.");
                 }
             }
         }
-
     }
 }
