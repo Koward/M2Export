@@ -13,8 +13,9 @@ namespace M2Export
 {
     public class M2Translator : MPxFileTranslator
     {
-        protected static string FExtension = "m2";
-        protected static M2.Format WoWVersion = M2.Format.Classic;
+        protected const string FExtension = "m2";
+        protected const M2.Format WoWVersion = M2.Format.LichKing;
+        protected const float Epsilon = 0.00001f;
 
         public override string defaultExtension()
         {
@@ -71,16 +72,18 @@ namespace M2Export
 
             MGlobal.displayInfo("Building model " + wowModel.Name);
 
-            ExtractJoints(wowModel.Bones);
+            var jointIds = ExtractJoints(wowModel.Bones);
             ExtractTextures(wowModel);
 
             var wowView = new M2SkinProfile();//TODO multiple views by decimating ?
             wowModel.Views.Add(wowView);//Because later in the code it always refers to wowModel.Views[0] since it's the only one we do.
-            ExtractMeshes(wowModel);
+            ExtractMeshes(wowModel, jointIds);
 
             //Static models requirements
             if(wowModel.Sequences.Count == 0) wowModel.Sequences.Add(new M2Sequence());//For non-animated models, basic "Stand"
             if(wowModel.Bones.Count == 0) wowModel.Bones.Add(new M2Bone());//For jointless static models
+            if(wowModel.TexUnitLookup.Count == 0) wowModel.TexUnitLookup.Add(-1);
+            if(wowModel.UvAnimLookup.Count == 0) wowModel.UvAnimLookup.Add(-1);
 
             using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
             {
@@ -93,7 +96,7 @@ namespace M2Export
         /// Creates the bone hierarchy.
         /// </summary>
         /// <param name="bones"></param>
-        private static void ExtractJoints(List<M2Bone> bones)
+        private static Dictionary<string, short> ExtractJoints(List<M2Bone> bones)
         {
             var boneRefs = new Dictionary<string, M2Bone>();//Maps a joint name to the WoW bone instance.
             var boneIds = new Dictionary<M2Bone, short>();//Maps a bone to its index
@@ -141,6 +144,9 @@ namespace M2Export
                 bones.Add(wowBone);
                 jointIter.next();
             }
+            var jointNameToBoneIndex = new Dictionary<string, short>();
+            foreach (var pair in boneRefs) jointNameToBoneIndex[pair.Key] = boneIds[pair.Value];
+            return jointNameToBoneIndex;
         }
 
         private static void ExtractTextures(M2 wowModel)
@@ -153,8 +159,8 @@ namespace M2Export
 
                 //Get attributes
                 var fileNamePlug = dependencyTexNode.findPlug("fileTextureName");
-                string filename;
-                fileNamePlug.getValue(out filename);
+                string mayaFilename;
+                fileNamePlug.getValue(out mayaFilename);
                 var wrapUPlug = dependencyTexNode.findPlug("wrapU");
                 var wrapU = false;
                 wrapUPlug.getValue(ref wrapU);
@@ -167,7 +173,7 @@ namespace M2Export
                 wowTexture.Type = M2Texture.TextureType.MonsterSkin1;
                 //TODO hardcoded textures
                 //if()
-                //wowTexture.Name = filename;//TODO replace extension by BLP
+                //wowTexture.Name = mayaFilename;//TODO replace extension by BLP
                 //else
 
                 if(wrapU) wowTexture.Flags |= M2Texture.TextureFlags.WrapX;
@@ -186,7 +192,8 @@ namespace M2Export
         /// <param name="wowMesh"></param>
         /// <param name="wowView"></param>
         /// <param name="globalVertices"></param>
-        private static void ExtractMeshData(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView, List<M2Vertex> globalVertices)
+        /// <param name="jointIds"></param>
+        private static void ExtractMeshData(MObject meshNode, M2SkinSection wowMesh, M2SkinProfile wowView, List<M2Vertex> globalVertices, Dictionary<string, short> jointIds)
         {
             //BEGIN Extract mesh data tables.
 
@@ -196,10 +203,9 @@ namespace M2Export
             meshFunctions.getUVSetNames(uvsets);
 
             //Bone Weights
-            float[][] vertexBoneWeights;
-            uint[][] vertexBoneIndices;
-            wowMesh.BoneInfluences = GetMeshWeights(out vertexBoneWeights, out vertexBoneIndices, meshFunctions);
-            var hasBoneWeights = vertexBoneIndices != null && vertexBoneWeights != null;
+            List<MFloatArray> vertexWeights;
+            MDagPathArray influenceObjects;
+            GetMeshWeightData(out vertexWeights, out influenceObjects, meshFunctions);
 
             //Positions
             var positions = new MFloatPointArray();
@@ -227,15 +233,32 @@ namespace M2Export
                     var meshRelativeIndex = (int) polygonIter.vertexIndex(i);
                     //var wowVertex = globalVertices[wowView.Indices[wowMesh.StartVertex + meshRelativeIndex]];
                     var wowVertex = new M2Vertex();
+                    var vertexBoneInfluences = 0;
 
                     //Bone weights
-                    if (hasBoneWeights)
+                    for (var b = 0; b < influenceObjects.length; b++)//for each joint
                     {
-                        for (var j = 0; j < vertexBoneIndices[meshRelativeIndex].Length; j++)
-                            wowVertex.BoneIndices[j] = (byte) vertexBoneIndices[meshRelativeIndex][j];
-                        for (var j = 0; j < vertexBoneWeights[meshRelativeIndex].Length; j++)
-                            wowVertex.BoneWeights[j] = (byte) (vertexBoneWeights[meshRelativeIndex][j] * byte.MaxValue);
+                        var kJointPath = influenceObjects[b];
+                        if (!kJointPath.hasFn(MFn.Type.kJoint) || meshRelativeIndex >= vertexWeights.Count) continue;
+                        var kJoint = new MFnDagNode(kJointPath);
+                        var jointWeights = vertexWeights[meshRelativeIndex];
+                        //Here are a joint&weight for the meshRelativeIndex vertex
+                        var boneIndex = jointIds[kJoint.name];
+                        var boneWeight = jointWeights[b];
+                        if (boneWeight > Epsilon)
+                        {
+                            Debug.Assert(vertexBoneInfluences <= 4, "This vertex is connected to "+vertexBoneInfluences+" joints. 4 allowed.");
+                            wowVertex.BoneIndices[vertexBoneInfluences] = (byte) boneIndex;
+                            wowVertex.BoneWeights[vertexBoneInfluences] = (byte) (boneWeight*byte.MaxValue);
+                            vertexBoneInfluences++;
+                        }
                     }
+                    if (vertexBoneInfluences == 0)
+                    {
+                        wowVertex.BoneIndices[vertexBoneInfluences] = 0;// There is always at least 1 rootbone, even for static models.
+                        wowVertex.BoneWeights[vertexBoneInfluences] = byte.MaxValue;
+                    }
+                    if (vertexBoneInfluences > wowMesh.BoneInfluences) wowMesh.BoneInfluences = (ushort) vertexBoneInfluences;
 
                     //Pos&Normal. Notice the axis changing between Maya and WoW
                     var position = positions[meshRelativeIndex];
@@ -263,7 +286,6 @@ namespace M2Export
                         wowMesh.NVertices++;
                         index = wowMeshVertices.Count;
                         wowMeshVertices.Add(wowVertex);
-                        MGlobal.displayInfo("Added vertex "+wowVertex.Position+" with texcoords "+wowVertex.TexCoords[0]+"\n");
                     }
 
                     wowView.Triangles.Add((ushort)(wowMesh.StartVertex + index));
@@ -273,42 +295,61 @@ namespace M2Export
             }
         }
 
-        private static ushort GetMeshWeights(out float[][] vertexBoneWeights, out uint[][] vertexBoneIndices, MFnMesh mesh)
+        private static void GetMeshWeightData(out List<MFloatArray> vertexWeights, out MDagPathArray influenceObjects, MFnMesh mesh)
         {
-            ushort boneInfluences = 0;
-            vertexBoneWeights = null;
-            vertexBoneIndices = null;
-            var inMeshPlug = mesh.findPlug("inMesh");
-            if (!inMeshPlug.isConnected) return boneInfluences;
-            var dgIt = new MItDependencyGraph(inMeshPlug);
-            while (!dgIt.isDone)
-            {
-                var thisNode = dgIt.thisNode();
-                if (thisNode.hasFn(MFn.Type.kSkinClusterFilter))
-                {
-                    var skinCluster = new MFnSkinCluster(thisNode);
-                    var weightListPlug = skinCluster.findPlug("weightList");
-                    vertexBoneWeights = new float[weightListPlug.numElements][];
-                    vertexBoneIndices = new uint[weightListPlug.numElements][];
-                    for (uint i = 0; i < weightListPlug.numElements; i++)//for each vertex
-                    {
-                        var weightPlug = weightListPlug.elementByPhysicalIndex(i).child(0);
-                        if(weightPlug.numElements > 4) throw new Exception("A vertex is influenced by "+weightPlug.numElements+". The maximum is 4.");
-                        if (weightPlug.numElements > boneInfluences)
-                            boneInfluences = (ushort) weightPlug.numElements;//M2SkinSection.BoneInfluences
-                        vertexBoneWeights[i] = new float[4];
-                        vertexBoneIndices[i] = new uint[4];
-                        for (uint j = 0; j < weightPlug.numElements; j++)//for each weight
-                        {
-                            weightPlug.elementByPhysicalIndex(j).getValue(vertexBoneWeights[i][j]);
-                            vertexBoneIndices[i][j] = weightPlug.elementByPhysicalIndex(j).logicalIndex;
-                        }
-                    }
+            vertexWeights = new List<MFloatArray>();
+            influenceObjects = new MDagPathArray();
 
+            /*
+            var shaderArray = new MObjectArray();//TODO maybe use that somewhere
+            var shaderIntArray = new MIntArray();
+
+            // Get connected shaders
+            mesh.getConnectedShaders(0, shaderArray, shaderIntArray);
+            */
+
+            // Get any attached skin cluster
+            var hasSkinCluster = false;
+
+            // Search the skin cluster affecting this geometry
+            var kDepNodeIt = new MItDependencyNodes(MFn.Type.kSkinClusterFilter);
+
+            // Go through each skin cluster in the scene until we find the one connected to this mesh
+            while (!kDepNodeIt.isDone && !hasSkinCluster)
+            {
+                var kObject = kDepNodeIt.thisNode;
+                var kSkinClusterFn = new MFnSkinCluster(kObject);
+                var uiNumGeometries = kSkinClusterFn.numOutputConnections;
+
+                // Go through each connection on the skin cluster until we get the one connecting to this mesh
+                for(uint uiGeometry = 0; uiGeometry < uiNumGeometries && !hasSkinCluster; uiGeometry++)
+                {
+                    var uiIndex = kSkinClusterFn.indexForOutputConnection(uiGeometry);
+                    var kInputObject = kSkinClusterFn.inputShapeAtIndex(uiIndex);
+                    var kOutputObject = kSkinClusterFn.outputShapeAtIndex(uiIndex);
+
+                    if (kOutputObject != mesh.objectProperty) continue;
+
+                    hasSkinCluster = true;
+                    kSkinClusterFn.influenceObjects(influenceObjects);
+
+                    // Go through each vertex and save the weights for each one
+                    var kGeometryIt = new MItGeometry(kInputObject);
+                    while (!kGeometryIt.isDone)
+                    {
+                        var kComponent = kGeometryIt.component;
+                        var kWeightArray = new MFloatArray();
+                        uint uiNumInfluences = 0;
+                        var dagPath = new MDagPath();
+                        MGlobal.displayInfo("DagPath for vertex : "+dagPath.fullPathName+"\n");
+                        kSkinClusterFn.getWeights(dagPath, kComponent, kWeightArray, ref uiNumInfluences);
+                        vertexWeights.Add(kWeightArray);
+
+                        kGeometryIt.next();
+                    }
                 }
-                dgIt.next();
+                kDepNodeIt.next();
             }
-            return boneInfluences;
         }
 
         /// <summary>
@@ -344,19 +385,27 @@ namespace M2Export
             }
         }
 
-        private static void ExtractMeshes(M2 wowModel)
+        private static void ExtractMeshes(M2 wowModel, Dictionary<string, short> jointIds)
         {
             var wowView = wowModel.Views[0];
             var globalVertices = wowModel.GlobalVertexList;
             var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
             while (!meshIter.isDone)
             {
+                var meshFn = new MFnMesh(meshIter.thisNode);
                 // only want non-history items
-                if (!new MFnMesh(meshIter.thisNode).isIntermediateObject)
+                if (!meshFn.isIntermediateObject)
                 {
+                    var name = meshFn.name;
+                    MGlobal.displayInfo("Mesh name : "+name);
+                    if (name == "collision")
+                    {
+                        MGlobal.displayInfo("\t Collision mesh detected.");
+                        //TODO collision stuff.
+                    }
                     var wowMesh = new M2SkinSection();
                     wowMesh.SubmeshId = 0;//TODO give a unique ID maybe ?
-                    ExtractMeshData(meshIter.thisNode, wowMesh, wowView, globalVertices);
+                    ExtractMeshData(meshIter.thisNode, wowMesh, wowView, globalVertices, jointIds);
                     WoWMeshBoneMapping(wowMesh, wowModel);
                     ExtractMeshShaders(meshIter.thisNode, wowModel, (ushort) (wowView.Submeshes.Count));
 
@@ -373,7 +422,7 @@ namespace M2Export
         /// </summary>
         /// <param name="shadingEngine"></param>
         /// <returns>The shader name.</returns>
-        private static string GetShaderName(MObject shadingEngine)
+        private static MObjectArray GetMaterials(MObject shadingEngine)
         {
             // attach a function set to the shading engine
             var fn = new MFnDependencyNode(shadingEngine);
@@ -387,11 +436,39 @@ namespace M2Export
 
             // get the material connected to the surface shader
             sShader.connectedTo(materials, true, false);
+            var materialsObjects = new MObjectArray();
 
-            if (materials.Count <= 0) return "none";
+            if (materials.Count <= 0) return materialsObjects;
             // if we found a material
-            var fnMat = new MFnDependencyNode(materials[0].node);
-            return fnMat.name;
+            foreach (var plug in materials)
+            {
+                materialsObjects.Add(plug.node);
+            }
+            return materialsObjects;
+        }
+
+        private static void ExtractMeshShadersNew(MObject mesh, M2 wowModel, ushort meshNumber)
+        {
+            MObject mayaObj = new MObject();//TODO
+            var shaderIter = new MItDependencyGraph(mayaObj, MFn.Type.kLambert, MItDependencyGraph.Direction.kUpstream, MItDependencyGraph.Traversal.kDepthFirst, MItDependencyGraph.Level.kNodeLevel);
+            var fnShader = new MFnLambertShader(shaderIter.thisNode());
+            // Get lambert out of the shader
+            var strName = fnShader.name;
+            var clrDiffuse = fnShader.color;
+            var clrAmbient = fnShader.ambientColor;
+            if (shaderIter.thisNode().hasFn(MFn.Type.kReflect))
+            {
+                var fnReflectShader = new MFnReflectShader(shaderIter.thisNode());
+                var clrSpec = fnReflectShader.specularColor;
+            }
+            // Look for texture
+            var colorPlug = fnShader.findPlug("color");
+            var fileTextureIter = new MItDependencyGraph(colorPlug.node, MFn.Type.kFileTexture, MItDependencyGraph.Direction.kUpstream, MItDependencyGraph.Traversal.kDepthFirst, MItDependencyGraph.Level.kNodeLevel);
+            var nodeFn = new MFnDependencyNode(fileTextureIter.thisNode());
+            var plug = nodeFn.findPlug("fileTextureName");
+            string textureFileName;
+            plug.getValue(out textureFileName);
+            //TODO something with texture FileName
         }
 
         private static void ExtractMeshShaders(MObject mesh, M2 wowModel, ushort meshNumber)
@@ -409,30 +486,31 @@ namespace M2Export
                 //var fn = new MFnDependencyNode(fnMesh.parent(i));
 
                 // this will hold references to the shaders used on the meshes
-                var shaders = new MObjectArray();
+                var shaderEngines = new MObjectArray();
 
                 // this is used to hold indices to the materials returned in the object array
                 var faceIndices = new MIntArray();
 
                 // get the shaders used by the i'th mesh instance
-                fnMesh.getConnectedShaders(i, shaders, faceIndices);
+                fnMesh.getConnectedShaders(i, shaderEngines, faceIndices);
 
-                switch (shaders.length)
+                switch (shaderEngines.length)
                 {
                     // if no shader applied to the mesh instance
                     case 0:
                         break;
                     // if all faces use the same material
                     case 1:
-                        var shaderName = GetShaderName(shaders[0]);//example : lambert1. TODO find more names
-                        MGlobal.displayInfo("Detected material : "+shaderName);//TODO remove once handled
+                        var materials = GetMaterials(shaderEngines[0]);
+                        var shaderName = new MFnDependencyNode(materials[0]).name;//example : lambert1. TODO find more names
+                        MGlobal.displayInfo("Detected material : "+shaderName+" of type "+ materials[0].apiTypeStr);//TODO remove once handled
                         var texUnit = new M2Batch();
                         texUnit.Flags = 16;
                         texUnit.SubmeshIndex = meshNumber;
 
                         //TODO Extract Material data
                         var material = new M2Material();
-                        material.BlendMode = M2Material.BlendingMode.Mod;//lambert1
+                        material.BlendMode = M2Material.BlendingMode.Opaque;//lambert1
                         wowModel.Materials.Add(material);
                         texUnit.RenderFlags = (ushort) (wowModel.Materials.Count - 1);
 
@@ -452,8 +530,7 @@ namespace M2Export
                         // i'm going to sort the face indicies into groups based on
                         // the applied material - might as well... ;)
                         // also, set to same size as num of shaders
-
-                        // ReSharper disable once CollectionNeverUpdated.Local
+                        /*
                         var facesByMatId = new List<List<int>>((int) shaders.length);
 
                         // put face index into correct array
@@ -468,6 +545,7 @@ namespace M2Export
                             var thisShaderName = GetShaderName(shaders[j]);
                             MGlobal.displayInfo(thisShaderName + " " + facesByMatId[j].Count);
                         }
+                        */
 
                         throw new NotImplementedException("Cannot handle more than one shader per mesh.");
                 }
