@@ -3,9 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.25123.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "M2Export", "M2Export\M2Export.csproj", "{15EDBCE3-48D4-4EE6-A94F-58180CB93CD6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "M2ExportLK", "M2ExportLK\M2ExportLK.csproj", "{15EDBCE3-48D4-4EE6-A94F-58180CB93CD6}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "M2Lib", "..\M2Lib\M2Lib\M2Lib.csproj", "{6508665A-54DE-41D7-919C-D1DAFBAB9D54}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MayaM2", "MayaM2\MayaM2.csproj", "{EE9A2912-4EC6-44B7-BE97-72111D887516}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +23,10 @@ Global
 		{6508665A-54DE-41D7-919C-D1DAFBAB9D54}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6508665A-54DE-41D7-919C-D1DAFBAB9D54}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6508665A-54DE-41D7-919C-D1DAFBAB9D54}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EE9A2912-4EC6-44B7-BE97-72111D887516}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EE9A2912-4EC6-44B7-BE97-72111D887516}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EE9A2912-4EC6-44B7-BE97-72111D887516}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EE9A2912-4EC6-44B7-BE97-72111D887516}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
