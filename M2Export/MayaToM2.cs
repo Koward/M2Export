@@ -7,7 +7,7 @@ using Autodesk.Maya.OpenMayaAnim;
 using M2Lib.m2;
 using M2Lib.types;
 
-namespace MayaM2
+namespace M2Export
 {
     /// <summary>
     /// Extract procedures from Maya to WoW.
@@ -392,11 +392,14 @@ namespace MayaM2
             wowModel.Materials.Add(wowMaterial);
             texUnit.RenderFlags = (ushort) (wowModel.Materials.Count - 1);
 
+            // ReSharper disable once UnusedVariable
             var clrDiffuse = fnShader.color;
+            // ReSharper disable once UnusedVariable
             var clrAmbient = fnShader.ambientColor;
             if (material.hasFn(MFn.Type.kReflect))
             {
                 var fnReflectShader = new MFnReflectShader(material);
+                // ReSharper disable once UnusedVariable
                 var clrSpec = fnReflectShader.specularColor;
             }
 
