@@ -50,7 +50,30 @@ namespace M2Export
         public override void writer(MFileObject file, string options, FileAccessMode mode)
         {
             MGlobal.displayInfo("Received options string : "+options);
-            var expansion = M2.Format.LichKing;
+            var expansion = ParseOptions(options);
+
+            MGlobal.displayInfo("Exporting to M2 "+expansion+"..");
+
+            // Name is fileName without .m2 extension
+            var wowModel = new M2 {Name = file.rawName.Substring(0, file.rawName.Length - 3)};
+
+            MayaToM2.ExtractModel(wowModel);
+
+            using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
+            {
+                wowModel.Save(writer, expansion);
+            }
+            MGlobal.displayInfo("Done.");
+        }
+
+        /// <summary>
+        /// Parse options given to the translator.
+        /// </summary>
+        /// <param name="options">The option string given by Maya.</param>
+        /// <returns>The desired WoW version.</returns>
+        private static M2.Format ParseOptions(string options)
+        {
+            var expansion = M2.Format.LichKing; 
             var optionList = options.Split(new[]{' ', ';'}, StringSplitOptions.RemoveEmptyEntries);
             for(var i = 0; i < optionList.Length; i++)
             {
@@ -82,19 +105,7 @@ namespace M2Export
                     }
                 }
             }
-
-            MGlobal.displayInfo("Exporting to M2 "+expansion+"..");
-
-            var wowModel = new M2 {Name = file.rawName.Substring(0, file.rawName.Length - 3)};
-            // Name is fileName without .m2 extension
-
-            MayaToM2.ExtractModel(wowModel);
-
-            using (var writer = new BinaryWriter(new FileStream(file.expandedFullName, FileMode.Create, FileAccess.Write)))
-            {
-                wowModel.Save(writer, expansion);
-            }
-            MGlobal.displayInfo("Done.");
+            return expansion;
         }
     }
 }

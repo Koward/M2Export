@@ -16,6 +16,10 @@ namespace M2Export
     {
         //As a rule about axis I took here (a,b,c) -> (a,-1*c,b). Hope it's right.
         private const float Epsilon = 0.00001f;
+        private static C3Vector AxisInvert(MFloatPoint point) => new C3Vector(point.z, point.x, point.y);
+        private static C3Vector AxisInvert(MFloatVector point) => new C3Vector(point.z, point.x, point.y);
+        private static C3Vector AxisInvert(MPoint point) => new C3Vector((float) point.z, (float) point.x, (float) point.y);
+        private static C3Vector AxisInvert(MVector point) => new C3Vector((float) point.z, (float) point.x, (float) point.y);
 
         public static void ExtractModel(M2 wowModel)
         {
@@ -81,7 +85,7 @@ namespace M2Export
                     };
                 }
                 // Axis inversion here
-                wowBone.Pivot = new C3Vector((float) pivot.x, (float) (-1 * pivot.z), (float) pivot.y);
+                wowBone.Pivot = AxisInvert(pivot);
 
                 bones.Add(wowBone);
                 jointIter.next();
@@ -178,11 +182,9 @@ namespace M2Export
 
                     //Pos&Normal. Notice the axis changing between Maya and WoW
                     var position = positions[meshRelativeIndex];
-                    wowVertex.Position = new C3Vector(position.x, -1*position.z, position.y);
+                    wowVertex.Position = AxisInvert(position);
                     var normal = normals[meshRelativeIndex];
-                    wowVertex.Normal = new C3Vector(normal[0], -1*normal[2], normal[1]);
-
-                    //TODO Generate CenterMass, CenterBoundingBox, Radius
+                    wowVertex.Normal = AxisInvert(normal);
 
                     //UV coordinates
                     if (uvsets.length <= 0 || meshFunctions.numUVs(uvsets[0]) <= 0) continue;
@@ -209,6 +211,11 @@ namespace M2Export
                 }
                 polygonIter.next();
             }
+            var boundingBox = meshFunctions.boundingBox;
+            wowMesh.CenterBoundingBox = AxisInvert(boundingBox.center);
+            wowMesh.Radius = (float) (Math.Max(boundingBox.depth/2, boundingBox.width/2));
+            //TODO generate CenterMass
+            wowMesh.CenterMass = wowMesh.CenterBoundingBox;
         }
 
         /// <summary>
@@ -285,7 +292,6 @@ namespace M2Export
             var boneRealToLookup = new Dictionary<int, int>();//Reverse lookup
 
             // Bone Lookup
-            wowMesh.StartBones = (ushort) wowModel.BoneLookup.Count;
             for (int i = wowMesh.StartVertex; i < wowMesh.StartVertex + wowMesh.NVertices; i++)
             {
                 var vert = wowModel.GlobalVertexList[wowView.Indices[i]];
@@ -320,6 +326,8 @@ namespace M2Export
         {
             var wowView = wowModel.Views[0];
             var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
+            var collisionFound = false;
+            var totalBoundingBox = new MBoundingBox();
             while (!meshIter.isDone)
             {
                 var meshFn = new MFnMesh(meshIter.thisNode);
@@ -327,21 +335,36 @@ namespace M2Export
                 if (!meshFn.isIntermediateObject)
                 {
                     var name = meshFn.name;
-                    MGlobal.displayInfo("Mesh name : "+name);
-                    if (name == "Collision")
+                    MGlobal.displayInfo("Mesh name : "+ name);
+                    if (name == "CollisionBox") //TODO use extension attribute
                     {
+                        if (collisionFound)
+                            throw new Exception("More than one collision box has been found. One supported.");
                         MGlobal.displayInfo("\t Collision mesh detected.");
-                        //TODO collision stuff.
+                        wowModel.CollisionBox = new CAaBox(AxisInvert(meshFn.boundingBox.min),
+                            AxisInvert(meshFn.boundingBox.max));
+                        wowModel.CollisionSphereRadius =
+                            (float) Math.Max(meshFn.boundingBox.depth/2, meshFn.boundingBox.width/2);
+                        collisionFound = true;
                     }
-                    var wowMesh = new M2SkinSection {SubmeshId = 0};
-                    //TODO give a unique ID maybe ?
-                    ExtractMeshData(meshIter.thisNode, wowMesh, wowModel, jointIds);
-                    ExtractMeshShaders(meshIter.thisNode, wowModel, (ushort) (wowView.Submeshes.Count));
-                    wowView.Submeshes.Add(wowMesh);
-                    WoWMeshBoneMapping(wowMesh, wowModel);
+                    else
+                    {
+                        var wowMesh = new M2SkinSection {SubmeshId = 0};
+                        //TODO give a unique ID maybe ?
+                        ExtractMeshData(meshIter.thisNode, wowMesh, wowModel, jointIds);
+                        ExtractMeshShaders(meshIter.thisNode, wowModel, (ushort) (wowView.Submeshes.Count));
+                        wowView.Submeshes.Add(wowMesh);
+                        WoWMeshBoneMapping(wowMesh, wowModel);
+                        totalBoundingBox.expand(meshFn.boundingBox);
+                    }
                 }
                 meshIter.next();
             }
+            wowModel.BoundingBox = new CAaBox(AxisInvert(totalBoundingBox.min),
+                AxisInvert(totalBoundingBox.max));
+            wowModel.BoundingSphereRadius =
+                (float) Math.Max(totalBoundingBox.depth/2, totalBoundingBox.width/2);
+            //TODO vertices, normal, triangle boundings
         }
 
         /// <summary>
@@ -493,5 +516,6 @@ namespace M2Export
                 }
             }
         }
+
     }
 }
