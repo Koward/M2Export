@@ -16,6 +16,9 @@ namespace M2Export
     {
         //As a rule about axis I took here (a,b,c) -> (a,-1*c,b). Hope it's right.
         private const float Epsilon = 0.00001f;
+        private const int MaxWeightsNumber = 4;
+
+        //Axis inversion Maya => WoW
         private static C3Vector AxisInvert(MFloatPoint point) => new C3Vector(point.z, point.x, point.y);
         private static C3Vector AxisInvert(MFloatVector point) => new C3Vector(point.z, point.x, point.y);
         private static C3Vector AxisInvert(MPoint point) => new C3Vector((float) point.z, (float) point.x, (float) point.y);
@@ -106,6 +109,8 @@ namespace M2Export
         {
             var wowView = wowModel.Views[0];
             var globalVertices = wowModel.GlobalVertexList;
+            var vertexSum = new MFloatPoint();//for CenterMass later
+            var vertexCounter = 0;
 
             //BEGIN Extract mesh data tables.
 
@@ -143,9 +148,10 @@ namespace M2Export
                 for (var i = 0; i < polygonIter.polygonVertexCount(); i++)//i = faceRelativeIndex
                 {
                     var meshRelativeIndex = (int) polygonIter.vertexIndex(i);
+                    var jointsWeightsForThisVertex = vertexWeights[meshRelativeIndex];
                     var wowVertex = new M2Vertex();
-                    var boneCounter = 0;
-                    var vertexDoubleWeights = new double[4];
+                    var vertexDoubleWeights = new List<double>();
+                    var vertexBoneIndices = new List<int>();
 
                     //Bone weights
                     for (var b = 0; b < influenceObjects.length; b++)//for each joint
@@ -153,35 +159,43 @@ namespace M2Export
                         var kJointPath = influenceObjects[b];
                         if (!kJointPath.hasFn(MFn.Type.kJoint) || meshRelativeIndex >= vertexWeights.Count) continue;
                         var kJoint = new MFnDagNode(kJointPath);
-                        var jointWeights = vertexWeights[meshRelativeIndex];
-                        Debug.Assert(b < jointWeights.Count, "vertexWeights size : " + vertexWeights.Count + " " +
-                                                             "\njointWeights for this vertex : " + jointWeights.Count);
+                        Debug.Assert(b < jointsWeightsForThisVertex.Count, "vertexWeights size : " + vertexWeights.Count + " " +
+                                                             "\njointWeights for this vertex : " + jointsWeightsForThisVertex.Count);
                         //Here are a joint&weight for the meshRelativeIndex vertex
                         var boneIndex = jointIds[kJoint.fullPathName];
-                        if (jointWeights[b] > Epsilon)
+                        if (jointsWeightsForThisVertex[b] > Epsilon)
                         {
-                            Debug.Assert(boneCounter <= 4, "This vertex is connected to "+boneCounter+" joints. A maximum of 4 is allowed.");
-                            wowVertex.BoneIndices[boneCounter] = (byte) boneIndex;
-                            vertexDoubleWeights[boneCounter] = jointWeights[b];
-                            boneCounter++;
+                            vertexBoneIndices.Add((byte) boneIndex);
+                            vertexDoubleWeights.Add(jointsWeightsForThisVertex[b]);
                         }
                     }
-                    var weightSum = vertexDoubleWeights.Sum();
-                    for(var j = 0; j < vertexDoubleWeights.Length; j++)
+                    if(vertexDoubleWeights.Count > MaxWeightsNumber)
+                        MGlobal.displayWarning("This vertex is connected to more than "+MaxWeightsNumber+ " joints. Only the " + MaxWeightsNumber + " biggest will be exported.");
+                    vertexDoubleWeights = vertexDoubleWeights.OrderByDescending(w => w).ToList();
+                    //TODO sort and take biggest
+                    double weightSum = 0;
+                    for (var j = 0; j < vertexDoubleWeights.Count && j < MaxWeightsNumber; j++) weightSum += vertexDoubleWeights[j];
+                    for(var j = 0; j < vertexDoubleWeights.Count && j < MaxWeightsNumber; j++)
                     {
+                        wowVertex.BoneIndices[j] = (byte) vertexBoneIndices[j];
                         wowVertex.BoneWeights[j] = (byte) (vertexDoubleWeights[j] / weightSum * byte.MaxValue);
                     }
-                    if (boneCounter == 0)
+                    if (vertexDoubleWeights.Count == 0)
                     {
                         MGlobal.displayInfo("No bone influence for vertex " + meshRelativeIndex);
                         // There is always at least 1 rootbone, even for static models.
                         wowVertex.BoneIndices[0] = 0;
                         wowVertex.BoneWeights[0] = byte.MaxValue;
                     }
-                    if (boneCounter > wowMesh.BoneInfluences) wowMesh.BoneInfluences = (ushort) boneCounter;
+                    if (vertexDoubleWeights.Count > wowMesh.BoneInfluences)
+                        wowMesh.BoneInfluences = (ushort) Math.Max(MaxWeightsNumber, vertexDoubleWeights.Count);
 
                     //Pos&Normal. Notice the axis changing between Maya and WoW
                     var position = positions[meshRelativeIndex];
+                    vertexSum.x = vertexSum.x + position.x;//To compute CenterMass
+                    vertexSum.y = vertexSum.y + position.y;
+                    vertexSum.z = vertexSum.z + position.z;
+                    vertexCounter++;
                     wowVertex.Position = AxisInvert(position);
                     var normal = normals[meshRelativeIndex];
                     wowVertex.Normal = AxisInvert(normal);
@@ -213,13 +227,18 @@ namespace M2Export
             }
             var boundingBox = meshFunctions.boundingBox;
             wowMesh.CenterBoundingBox = AxisInvert(boundingBox.center);
-            wowMesh.Radius = (float) (Math.Max(boundingBox.depth/2, boundingBox.width/2));
-            //TODO generate CenterMass
-            wowMesh.CenterMass = wowMesh.CenterBoundingBox;
+            wowMesh.Radius = (float) Math.Max(boundingBox.depth/2, boundingBox.width/2);
+            var centerMass = new MFloatPoint
+            {
+                x = vertexSum.x/vertexCounter,
+                y = vertexSum.y/vertexCounter,
+                z = vertexSum.z/vertexCounter
+            };
+            wowMesh.CenterMass = AxisInvert(centerMass);
         }
 
         /// <summary>
-        /// Get for each vertex the weights for all influence objects.
+        /// Get for each vertex the weights for all influence objects, including zero weights.
         /// </summary>
         /// <param name="vertexWeights"></param>
         /// <param name="influenceObjects"></param>
@@ -306,7 +325,7 @@ namespace M2Export
                     boneRealToLookup[boneIndex] = wowModel.BoneLookup.Count - 1;
                     wowMesh.NBones++;
                 }
-                var lookupIndices = new byte[4];
+                var lookupIndices = new byte[MaxWeightsNumber];
                 for (var j = 0; j < realIndices.Length; j++)// Create a vertex property which is vertex bone indices but with lookup values.
                 {
                     if (weights[j] == 0) continue;
@@ -341,10 +360,7 @@ namespace M2Export
                         if (collisionFound)
                             throw new Exception("More than one collision box has been found. One supported.");
                         MGlobal.displayInfo("\t Collision mesh detected.");
-                        wowModel.CollisionBox = new CAaBox(AxisInvert(meshFn.boundingBox.min),
-                            AxisInvert(meshFn.boundingBox.max));
-                        wowModel.CollisionSphereRadius =
-                            (float) Math.Max(meshFn.boundingBox.depth/2, meshFn.boundingBox.width/2);
+                        ExtractCollisionMesh(meshFn, wowModel);
                         collisionFound = true;
                     }
                     else
@@ -364,7 +380,33 @@ namespace M2Export
                 AxisInvert(totalBoundingBox.max));
             wowModel.BoundingSphereRadius =
                 (float) Math.Max(totalBoundingBox.depth/2, totalBoundingBox.width/2);
-            //TODO vertices, normal, triangle boundings
+        }
+
+        /// <summary>
+        /// Extract the vertices, normals and triangles of a mesh into the M2 collision data fields.
+        /// </summary>
+        /// <param name="meshFn"></param>
+        /// <param name="wowModel"></param>
+        private static void ExtractCollisionMesh(MFnMesh meshFn, M2 wowModel)
+        {
+            wowModel.CollisionBox = new CAaBox(AxisInvert(meshFn.boundingBox.min),
+                AxisInvert(meshFn.boundingBox.max));
+            wowModel.CollisionSphereRadius =
+                (float) Math.Max(meshFn.boundingBox.depth/2, meshFn.boundingBox.width/2);
+
+            var collisionPoints = new MFloatPointArray();
+            meshFn.getPoints(collisionPoints);
+            var collisionNormals = new MFloatVectorArray();
+            meshFn.getNormals(collisionNormals);
+            var collisionTriangles = new MIntArray();
+            meshFn.getTriangles(new MIntArray(), collisionTriangles);
+            for (var i = 0; i < collisionPoints.Count; i++)
+            {
+                wowModel.CollisionVertices.Add(AxisInvert(collisionPoints[i]));
+                wowModel.CollisionNormals.Add(AxisInvert(collisionNormals[i]));
+            }
+            foreach(var vertIndex in collisionTriangles)
+                wowModel.CollisionTriangles.Add((ushort) vertIndex);
         }
 
         /// <summary>
@@ -516,6 +558,5 @@ namespace M2Export
                 }
             }
         }
-
     }
 }
