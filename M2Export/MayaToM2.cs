@@ -14,15 +14,15 @@ namespace M2Export
     /// </summary>
     public static class MayaToM2
     {
-        //As a rule about axis I took here (a,b,c) -> (a,-1*c,b). Hope it's right.
         private const float Epsilon = 0.00001f;
         private const int MaxWeightsNumber = 4;
 
         //Axis inversion Maya => WoW
-        private static C3Vector AxisInvert(MFloatPoint point) => new C3Vector(point.z, point.x, point.y);
-        private static C3Vector AxisInvert(MFloatVector point) => new C3Vector(point.z, point.x, point.y);
-        private static C3Vector AxisInvert(MPoint point) => new C3Vector((float) point.z, (float) point.x, (float) point.y);
-        private static C3Vector AxisInvert(MVector point) => new C3Vector((float) point.z, (float) point.x, (float) point.y);
+        private static C3Vector AxisInvert(float x, float y, float z) => new C3Vector(-1*x, z, y);
+        private static C3Vector AxisInvert(MFloatPoint point) => new C3Vector(-1*point.x, point.z, point.y);
+        private static C3Vector AxisInvert(MFloatVector point) => new C3Vector(-1*point.x, point.z, point.y);
+        private static C3Vector AxisInvert(MPoint point) => new C3Vector((float) (-1*point.x), (float) point.z, (float) point.y);
+        //private static C3Vector AxisInvert(MVector point) => new C3Vector((float) (-1*point.x), (float) point.z, (float) point.y);
 
         public static void ExtractModel(M2 wowModel)
         {
@@ -60,7 +60,6 @@ namespace M2Export
                 jointIter.getPath(jointPath);
                 var joint = new MFnIkJoint(jointPath);
 
-                MVector pivot;
                 var isRoot = false;
                 if (joint.parentCount == 0) isRoot = true;
                 else if (!joint.parent(0).hasFn(MFn.Type.kJoint)) isRoot = true;
@@ -68,44 +67,100 @@ namespace M2Export
                 {
                     wowBone.ParentBone = -1;
                     wowBone.KeyBoneId = M2Bone.KeyBone.Root;
-                    pivot = joint.getTranslation(MSpace.Space.kObject);
                 }
                 else
                 {
                     var parentPath = new MFnIkJoint(joint.parent(0)).fullPathName;
                     wowBone.ParentBone = boneIds[boneRefs[parentPath]];
-                    wowBone.KeyBoneId = M2Bone.KeyBone.Other;
+                    wowBone.KeyBoneId = GetBoneType(joint);
                     //TODO wowBone.KeyBoneId. Maybe with a special name the user sets ?
+                    //Note : there is an existing thing in Maya
                     //Note : M2Bone.submesh_id is wrong in the wiki. Do not try to compute it.
-                    var parentTranslation = new MFnIkJoint(joint.parent(0)).getTranslation(MSpace.Space.kObject);
-                    var parentPivot = bones[wowBone.ParentBone].Pivot;
-                    //TODO check if axis inversion needed
-                    pivot = new MVector
-                    {
-                        x = parentTranslation.x + parentPivot.X,
-                        y = parentTranslation.y + parentPivot.Y,
-                        z = parentTranslation.z + parentPivot.Z
-                    };
                 }
-                // Axis inversion here
-                wowBone.Pivot = AxisInvert(pivot);
+                var jointPosition = new MDoubleArray();
+                //This MEL has no C++/C# equivalent, it seems.
+                MGlobal.executeCommand("joint -q -position " + jointPath.fullPathName, jointPosition);
+                wowBone.Pivot = AxisInvert(
+                    (float) jointPosition[0],
+                    (float) jointPosition[1],
+                    (float) jointPosition[2]);
 
                 bones.Add(wowBone);
                 jointIter.next();
             }
+
             var jointNameToBoneIndex = new Dictionary<string, short>();
             foreach (var pair in boneRefs) jointNameToBoneIndex[pair.Key] = boneIds[pair.Value];
             return jointNameToBoneIndex;
         }
 
         /// <summary>
+        /// Get bone type from joint labelling.
+        /// </summary>
+        /// <param name="joint">Joint to get labelling attributes from.</param>
+        /// <returns>A WoW bone label.</returns>
+        //TODO finish cases.
+        // ReSharper disable once SuggestBaseTypeForParameter
+        private static M2Bone.KeyBone GetBoneType(MFnIkJoint joint)
+        {
+            var jointName = joint.fullPathName;
+            var type = MGlobal.executeCommandStringResult("getAttr -asString "+jointName+".type");
+            var side = MGlobal.executeCommandStringResult("getAttr -asString "+jointName+".side");
+            switch (side)
+            {
+                case "Left":
+                    switch (type)
+                    {
+                        case "Shoulder": return M2Bone.KeyBone.ShoulderL;
+                        case "Index Finger": return M2Bone.KeyBone.IndexFingerL;
+                        case "Middle Finger": return M2Bone.KeyBone.MiddleFingerL;
+                        case "Ring Finger": return M2Bone.KeyBone.RingFingerL;
+                        case "Pinky Finger": return M2Bone.KeyBone.PinkyFingerL;
+                        case "Thumb": return M2Bone.KeyBone.ThumbL;
+                        case "Other":
+                            var otherType = MGlobal.executeCommandStringResult("getAttr -asString "+jointName+".otherType");
+                            if(otherType == "Arm") return M2Bone.KeyBone.ArmL;
+                            break;
+                    }
+                    break;
+                case "Right":
+                    switch (type)
+                    {
+                        case "Shoulder": return M2Bone.KeyBone.ShoulderR;
+                        case "Index Finger": return M2Bone.KeyBone.IndexFingerR;
+                        case "Middle Finger": return M2Bone.KeyBone.MiddleFingerR;
+                        case "Ring Finger": return M2Bone.KeyBone.RingFingerR;
+                        case "Pinky Finger": return M2Bone.KeyBone.PinkyFingerR;
+                        case "Thumb": return M2Bone.KeyBone.ThumbR;
+                        case "Other":
+                            var otherType = MGlobal.executeCommandStringResult("getAttr -asString " + jointName + ".otherType");
+                            if (otherType == "Arm") return M2Bone.KeyBone.ArmR;
+                            break;
+                    }
+                    break;
+            }
+            switch (type)
+            {
+                case "Root": return M2Bone.KeyBone.Root;
+                case "Hip": return M2Bone.KeyBone.Waist;
+                case "Spine": return M2Bone.KeyBone.SpineLow;
+                case "Head": return M2Bone.KeyBone.Head;
+                case "Other":
+                    //TODO cases
+                    var otherType = MGlobal.executeCommandStringResult("getAttr -asString " + jointName + ".otherType");
+                    break;
+            }
+            return M2Bone.KeyBone.Other;
+        }
+
+        /// <summary>
         /// Faces and vertices UVs, positions and normals.
         /// </summary>
-        /// <param name="meshNode"></param>
+        /// <param name="meshPath"></param>
         /// <param name="wowMesh"></param>
         /// <param name="wowModel"></param>
         /// <param name="jointIds"></param>
-        private static void ExtractMeshData(MObject meshNode, M2SkinSection wowMesh, M2 wowModel, IReadOnlyDictionary<string, short> jointIds)
+        private static void ExtractMeshData(MDagPath meshPath, M2SkinSection wowMesh, M2 wowModel, IReadOnlyDictionary<string, short> jointIds)
         {
             var wowView = wowModel.Views[0];
             var globalVertices = wowModel.GlobalVertexList;
@@ -116,21 +171,21 @@ namespace M2Export
 
             // UV Sets
             var uvsets = new MStringArray();
-            var meshFunctions = new MFnMesh(meshNode);
+            var meshFunctions = new MFnMesh(meshPath);
             meshFunctions.getUVSetNames(uvsets);
 
             //Bone Weights
             List<MDoubleArray> vertexWeights;
             MDagPathArray influenceObjects;
-            GetMeshWeightData(out vertexWeights, out influenceObjects, MDagPath.getAPathTo(meshNode));
+            GetMeshWeightData(out vertexWeights, out influenceObjects, meshPath);
 
             //Positions
             var positions = new MFloatPointArray();
-            meshFunctions.getPoints(positions);
+            meshFunctions.getPoints(positions, MSpace.Space.kWorld);
 
             //Normals
             var normals = new MFloatVectorArray();
-            meshFunctions.getVertexNormals(false, normals);
+            meshFunctions.getVertexNormals(false, normals, MSpace.Space.kWorld);
 
             //END of extracting data tables
 
@@ -139,7 +194,7 @@ namespace M2Export
             wowMesh.StartVertex = (ushort) wowView.Indices.Count;//TODO Check level for big models, like character models with lots of triangles
             wowMesh.StartTriangle = (ushort) wowView.Triangles.Count;//TODO Check level for big models
 
-            var polygonIter = new MItMeshPolygon(meshNode);
+            var polygonIter = new MItMeshPolygon(meshPath);
             while (!polygonIter.isDone)
             {
                 Debug.Assert(polygonIter.polygonVertexCount() == 3, 
@@ -172,7 +227,6 @@ namespace M2Export
                     if(vertexDoubleWeights.Count > MaxWeightsNumber)
                         MGlobal.displayWarning("This vertex is connected to more than "+MaxWeightsNumber+ " joints. Only the " + MaxWeightsNumber + " biggest will be exported.");
                     vertexDoubleWeights = vertexDoubleWeights.OrderByDescending(w => w).ToList();
-                    //TODO sort and take biggest
                     double weightSum = 0;
                     for (var j = 0; j < vertexDoubleWeights.Count && j < MaxWeightsNumber; j++) weightSum += vertexDoubleWeights[j];
                     for(var j = 0; j < vertexDoubleWeights.Count && j < MaxWeightsNumber; j++)
@@ -274,7 +328,7 @@ namespace M2Export
                     var kInputObject = kSkinClusterFn.inputShapeAtIndex(uiIndex);
                     var kOutputObject = kSkinClusterFn.outputShapeAtIndex(uiIndex);
                     if (!kOutputObject.hasFn(MFn.Type.kMesh)) continue;
-                    var fnOutput = new MFnMesh(kOutputObject);
+                    var fnOutput = new MFnMesh(MDagPath.getAPathTo(kOutputObject));
                     MGlobal.displayInfo("Output object : " + fnOutput.fullPathName);
 
                     if (fnOutput.fullPathName != fnMesh.fullPathName) continue;
@@ -344,31 +398,36 @@ namespace M2Export
         private static void ExtractMeshes(M2 wowModel, IReadOnlyDictionary<string, short> jointIds)
         {
             var wowView = wowModel.Views[0];
+            //var meshIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kMesh);
             var meshIter = new MItDependencyNodes(MFn.Type.kMesh);
             var collisionFound = false;
             var totalBoundingBox = new MBoundingBox();
             while (!meshIter.isDone)
             {
-                var meshFn = new MFnMesh(meshIter.thisNode);
+                var meshPath = new MDagPath();//TODO FIXME use DagPath
+                //MDagPath.getAPathTo(meshIter.currentItem(), meshPath);
+                MDagPath.getAPathTo(meshIter.thisNode, meshPath);
+
+                var meshFn = new MFnMesh(meshPath);
                 // only want non-history items
-                if (!meshFn.isIntermediateObject)
+                if (!meshFn.isIntermediateObject)//TODO Check if already processed
                 {
                     var name = meshFn.name;
                     MGlobal.displayInfo("Mesh name : "+ name);
-                    if (name == "CollisionBox") //TODO use extension attribute
+                    if (name == "Collision") //TODO use custom attribute
                     {
                         if (collisionFound)
                             throw new Exception("More than one collision box has been found. One supported.");
                         MGlobal.displayInfo("\t Collision mesh detected.");
-                        ExtractCollisionMesh(meshFn, wowModel);
+                        ExtractCollisionMesh(meshPath, wowModel);
                         collisionFound = true;
                     }
                     else
                     {
                         var wowMesh = new M2SkinSection {SubmeshId = 0};
                         //TODO give a unique ID maybe ?
-                        ExtractMeshData(meshIter.thisNode, wowMesh, wowModel, jointIds);
-                        ExtractMeshShaders(meshIter.thisNode, wowModel, (ushort) (wowView.Submeshes.Count));
+                        ExtractMeshData(meshPath, wowMesh, wowModel, jointIds);
+                        ExtractMeshShaders(meshPath, wowModel, (ushort) wowView.Submeshes.Count);
                         wowView.Submeshes.Add(wowMesh);
                         WoWMeshBoneMapping(wowMesh, wowModel);
                         totalBoundingBox.expand(meshFn.boundingBox);
@@ -385,19 +444,20 @@ namespace M2Export
         /// <summary>
         /// Extract the vertices, normals and triangles of a mesh into the M2 collision data fields.
         /// </summary>
-        /// <param name="meshFn"></param>
+        /// <param name="meshPath"></param>
         /// <param name="wowModel"></param>
-        private static void ExtractCollisionMesh(MFnMesh meshFn, M2 wowModel)
+        private static void ExtractCollisionMesh(MDagPath meshPath, M2 wowModel)
         {
+            var meshFn = new MFnMesh(meshPath);
             wowModel.CollisionBox = new CAaBox(AxisInvert(meshFn.boundingBox.min),
                 AxisInvert(meshFn.boundingBox.max));
             wowModel.CollisionSphereRadius =
                 (float) Math.Max(meshFn.boundingBox.depth/2, meshFn.boundingBox.width/2);
 
             var collisionPoints = new MFloatPointArray();
-            meshFn.getPoints(collisionPoints);
+            meshFn.getPoints(collisionPoints, MSpace.Space.kWorld);
             var collisionNormals = new MFloatVectorArray();
-            meshFn.getNormals(collisionNormals);
+            meshFn.getNormals(collisionNormals, MSpace.Space.kWorld);
             var collisionTriangles = new MIntArray();
             meshFn.getTriangles(new MIntArray(), collisionTriangles);
             for (var i = 0; i < collisionPoints.Count; i++)
@@ -500,16 +560,16 @@ namespace M2Export
         /// <summary>
         /// Extract all shaders (M2Batch) linked to a mesh.
         /// </summary>
-        /// <param name="mesh"></param>
+        /// <param name="meshPath"></param>
         /// <param name="wowModel"></param>
         /// <param name="meshNumber"></param>
-        private static void ExtractMeshShaders(MObject mesh, M2 wowModel, ushort meshNumber)
+        private static void ExtractMeshShaders(MDagPath meshPath, M2 wowModel, ushort meshNumber)
         {
             var wowView = wowModel.Views[0];
-            var fnMesh = new MFnMesh(mesh);
+            var meshFn = new MFnMesh(meshPath);
 
             // get the number of instances
-            var numInstances = fnMesh.parentCount;
+            var numInstances = meshFn.parentCount;
 
             // loop through each instance of the mesh
             for (uint i = 0; i < numInstances; ++i)
@@ -524,7 +584,7 @@ namespace M2Export
                 var faceIndices = new MIntArray();
 
                 // get the shaders used by the i'th mesh instance
-                fnMesh.getConnectedShaders(i, shaderEngines, faceIndices);
+                meshFn.getConnectedShaders(i, shaderEngines, faceIndices);
 
                 switch (shaderEngines.length)
                 {

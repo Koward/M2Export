@@ -1,0 +1,57 @@
+global proc InitWoWGUI() {
+	setParent MayaWindow;
+	menu
+		-label "WoW Options"
+		-parent MayaWindow
+		-tearOff true wowMenu;
+		menuItem
+			-label "Set Mesh Attributes"
+			-ann "Add custom M2 attributes to selected meshes"
+			-c "addMeshAttributes";
+		menuItem
+			-label "Set Joint Attributes"
+			-ann "Add custom M2 attributes to selected joints"
+			-c "addJointAttributes";
+		menuItem
+			-label "What is big and can't swim ?"
+			-ann "Try to guess !"
+			-c "badJoke";
+}
+
+global proc addMeshAttributes() {
+	string $select[] = `ls -sl`;
+	string $nodes[] = `ls -sl -dag -lf -type "mesh"`;
+	if(size($nodes) == 0){
+		print("No mesh selected.\n");
+	}
+	for($node in $nodes){
+		print("Adding attributes to Mesh " + $node+"\n");
+		// Custom attributes
+		if (!`objExists ($node + ".customAttribute")`) {
+			addAttr 
+				-ln "customAttribute" 
+				-attributeType "float" 
+				-defaultValue 42.0 
+				-minValue 0.0 
+				-maxValue 100.0 $node;
+		}
+	}
+	select -r $select;
+}
+
+global proc addJointAttributes() {
+	string $select[] = `ls -sl`;
+	string $nodes[] = `ls -sl -dag -type "joint"`;
+	if(size($nodes) == 0){
+		print("No joint selected.\n");
+	}
+	for($node in $nodes){
+		//TODO add attributes to $node
+		print("Adding attributes to Joint " + $node+"\n");
+	}
+	select -r $select;
+}
+
+global proc badJoke(){
+	print("A bus full of children.\n");
+}
