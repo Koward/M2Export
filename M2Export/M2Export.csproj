@@ -68,6 +68,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="M2Translator.cs" />
+    <Compile Include="MayaM2Bone.cs" />
     <Compile Include="MayaToM2.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

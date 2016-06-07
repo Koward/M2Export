@@ -25,7 +25,7 @@ global proc addMeshAttributes() {
 		print("No mesh selected.\n");
 	}
 	for($node in $nodes){
-		print("Adding attributes to Mesh " + $node+"\n");
+		print("Adding attributes to " + $node+"\n");
 		// Custom attributes
 		if (!`objExists ($node + ".customAttribute")`) {
 			addAttr 
@@ -47,7 +47,33 @@ global proc addJointAttributes() {
 	}
 	for($node in $nodes){
 		//TODO add attributes to $node
-		print("Adding attributes to Joint " + $node+"\n");
+		print("Adding attributes to " + $node+"\n");
+	}
+	select -r $select;
+}
+
+global proc addMaterialAttributes() {
+	string $select[] = `ls -sl`;
+	for($n in `ls -sl -fl -dag -g`){
+		$shadingEngines=`listConnections -t shadingEngine $n`;
+			for($s in $shadingEngines){
+				$lambertNode = `listConnections  ($s+".surfaceShader")`;
+                print($lambertNode); 
+			}
+    }
+	select -r $select;
+}
+
+// Example of adding node custom attributes
+global proc addMyNodeAttributes() {
+	string $select[] = `ls -sl`;
+	string $nodes[] = `ls -sl -dag -type "myNode"`;
+	if(size($nodes) == 0){
+		print("No myNode selected.\n");
+	}
+	for($node in $nodes){
+		//TODO add attributes to $node
+		print("Adding attributes to " + $node+"\n");
 	}
 	select -r $select;
 }
