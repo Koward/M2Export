@@ -4,7 +4,7 @@ using Autodesk.Maya.OpenMaya;
 using M2Export;
 using M2Lib.m2;
 
-[assembly: MPxFileTranslatorClass(typeof(M2Translator), "World of Warcraft M2", null, "M2ExportUIOptions", "-expansion 2")]
+[assembly: MPxFileTranslatorClass(typeof(M2Translator), "World of Warcraft M2", null, "M2ShowUIOptionsExport", "-expansion 2")]
 
 namespace M2Export
 {
@@ -49,7 +49,8 @@ namespace M2Export
         /// <param name="mode"></param>
         public override void writer(MFileObject file, string options, FileAccessMode mode)
         {
-            MGlobal.displayInfo("Received options string : "+options);
+            if(mode == FileAccessMode.kExportActiveAccessMode)
+                throw new NotImplementedException("Exporting only selection is not supported yet. Use \"Export All\" instead");
             var expansion = ParseOptions(options);
 
             MGlobal.displayInfo("Exporting to M2 "+expansion+"..");
@@ -78,13 +79,11 @@ namespace M2Export
             for(var i = 0; i < optionList.Length; i++)
             {
                 var option = optionList[i];
-                MGlobal.displayInfo("Command : "+option);
                 // ReSharper disable once InvertIf
                 if (option == "-expansion")
                 {
                     i++;
                     var parameter = optionList[i];
-                    MGlobal.displayInfo("\tParameter : "+parameter);
                     switch (parameter)
                     {
                         case "0":

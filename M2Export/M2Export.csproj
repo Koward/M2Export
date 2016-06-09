@@ -67,8 +67,11 @@
     <Reference Include="PresentationFramework" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="M2Editor.cs" />
+    <Compile Include="M2EditorNode.cs" />
     <Compile Include="M2Translator.cs" />
     <Compile Include="MayaM2Bone.cs" />
+    <Compile Include="MayaM2Sequence.cs" />
     <Compile Include="MayaToM2.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

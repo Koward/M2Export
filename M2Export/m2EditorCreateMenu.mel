@@ -1,24 +1,32 @@
-global proc InitWoWGUI() {
+global proc m2EditorCreateMenu() {
 	setParent MayaWindow;
-	menu
-		-label "WoW Options"
-		-parent MayaWindow
-		-tearOff true wowMenu;
-		menuItem
-			-label "Set Mesh Attributes"
-			-ann "Add custom M2 attributes to selected meshes"
-			-c "addMeshAttributes";
-		menuItem
-			-label "Set Joint Attributes"
-			-ann "Add custom M2 attributes to selected joints"
-			-c "addJointAttributes";
-		menuItem
-			-label "What is big and can't swim ?"
-			-ann "Try to guess !"
-			-c "badJoke";
+	if (!`menuItem -q -exists m2EditorMenu`){
+		menu
+			-label "WoW Tools"
+			-parent MayaWindow
+			-tearOff true m2EditorMenu;
+			menuItem
+				-label "Sequences"
+				-ann "Define when animations will be played in World of Warcraft"
+				-c "m2SequenceEditor";
+			menuItem
+				-label "Set Mesh Attributes"
+				-ann "Add custom M2 attributes to selected meshes"
+				-c "addMeshAttributes";
+			menuItem
+				-label "Set Joint Attributes"
+				-ann "Add custom M2 attributes to selected joints"
+				-c "addJointAttributes";
+	}
 }
 
-global proc addMeshAttributes() {
+global proc m2EditorDeleteMenu() {
+	if (!`menuItem -q -exists m2EditorMenu`){
+		deleteUI -menu "m2EditorMenu";
+	}
+}
+
+proc addMeshAttributes() {
 	string $select[] = `ls -sl`;
 	string $nodes[] = `ls -sl -dag -lf -type "mesh"`;
 	if(size($nodes) == 0){
@@ -39,7 +47,7 @@ global proc addMeshAttributes() {
 	select -r $select;
 }
 
-global proc addJointAttributes() {
+proc addJointAttributes() {
 	string $select[] = `ls -sl`;
 	string $nodes[] = `ls -sl -dag -type "joint"`;
 	if(size($nodes) == 0){
@@ -52,7 +60,7 @@ global proc addJointAttributes() {
 	select -r $select;
 }
 
-global proc addMaterialAttributes() {
+proc addMaterialAttributes() {
 	string $select[] = `ls -sl`;
 	for($n in `ls -sl -fl -dag -g`){
 		$shadingEngines=`listConnections -t shadingEngine $n`;
@@ -65,7 +73,7 @@ global proc addMaterialAttributes() {
 }
 
 // Example of adding node custom attributes
-global proc addMyNodeAttributes() {
+proc addMyNodeAttributes() {
 	string $select[] = `ls -sl`;
 	string $nodes[] = `ls -sl -dag -type "myNode"`;
 	if(size($nodes) == 0){
@@ -76,8 +84,4 @@ global proc addMyNodeAttributes() {
 		print("Adding attributes to " + $node+"\n");
 	}
 	select -r $select;
-}
-
-global proc badJoke(){
-	print("A bus full of children.\n");
 }

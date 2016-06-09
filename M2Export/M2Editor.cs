@@ -1,9 +1,9 @@
 ﻿using Autodesk.Maya.OpenMaya;
+using M2Export;
 
-// This line is not mandatory, but improves loading performances
-[assembly: ExtensionPlugin(typeof(WoWTools.AddInterface))]
+[assembly: ExtensionPlugin(typeof(M2Editor), "M2Editor")]
 
-namespace WoWTools
+namespace M2Export
 {
 
     // This class is instantiated by Maya once and kept alive for the 
@@ -11,19 +11,19 @@ namespace WoWTools
     // then you should remove this class.
     // Its presence still improve load performance whilst you don't do any
     // initialization in it.
-    public class AddInterface : IExtensionPlugin
+    public class M2Editor : IExtensionPlugin
     {
         public bool InitializePlugin()
         {
             // Initialize your plug-in application here
-            MGlobal.executeCommand("InitWoWGUI");
+            MGlobal.executeCommand("m2EditorCreateMenu");
             return true;
         }
 
         public bool UninitializePlugin()
         {
             // Do plug-in application clean up here
-            MGlobal.executeCommand("DelWoWGUI");
+            MGlobal.executeCommand("m2EditorDeleteMenu");
             return true;
         }
 

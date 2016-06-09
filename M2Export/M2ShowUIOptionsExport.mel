@@ -3,7 +3,7 @@
 // $settings - the initial exporter settings
 // $callback - the function to call
 //
-global proc int M2ExportUIOptions(string $parent, string $action,
+global proc int M2ShowUIOptionsExport(string $parent, string $action,
 string $settings,
 string $callback )
 {
@@ -16,14 +16,14 @@ string $callback )
 		// create a simple layout for the controls
 		columnLayout -adj true;
 
-		text -label "M2 Export Plugin by Koward, Vellear and StoneHarry\n" -align "center";
+			text -label "M2 Export Plugin\n" -align "center";
 		
-		optionMenu -label "WoW Expansion" expansion;
-			menuItem -label "Classic";
-			menuItem -label "Burning Crusade";
-			menuItem -label "Wrath of the Lich King";
-			menuItem -label "Cataclysm - Warlords of Draenor";
-		optionMenu -e -sl 3 expansion;
+			optionMenu -label "WoW Expansion" expansion;
+				menuItem -label "Classic";
+				menuItem -label "Burning Crusade";
+				menuItem -label "Wrath of the Lich King";
+				menuItem -label "Cataclysm - Warlords of Draenor";
+			optionMenu -e -sl 3 expansion;
 		
 		// split the previous set of options
 		string $options[];

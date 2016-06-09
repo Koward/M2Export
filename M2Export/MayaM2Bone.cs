@@ -84,6 +84,10 @@ namespace M2Export
         private static MQuaternion AxisInvert(MQuaternion vec) 
             => MGlobal.isYAxisUp ? new MEulerRotation(-1*vec.asEulerRotation.x, vec.asEulerRotation.z, vec.asEulerRotation.y).asQuaternion : vec;
 
+        /// <summary>
+        /// Apply a quaternion rotation on all translation data of this bone. Used to apply the jointOrient.
+        /// </summary>
+        /// <param name="quat"></param>
         public void RotateTranslation(MQuaternion quat)
         {
             BaseTranslation = BaseTranslation.rotateBy(quat);

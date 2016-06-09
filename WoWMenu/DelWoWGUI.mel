@@ -1,3 +1,0 @@
-global proc DelWoWGUI() {
-	deleteUI -menu "wowMenu";
-}

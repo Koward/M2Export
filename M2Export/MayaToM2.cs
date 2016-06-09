@@ -48,6 +48,7 @@ namespace M2Export
 
             MAnimControl.currentTime = initialTime;
         }
+
         /// <summary>
         /// Creates the bone hierarchy.
         /// </summary>
@@ -58,11 +59,13 @@ namespace M2Export
 
             // Sequences
             //TODO multiple sequences
-            var start = MAnimControl.animationStartTime;
-            var end = MAnimControl.animationEndTime;
+            //TODO find "m2Editor" node, get the "animClips" array and build sequence if the export attribute is true
+
+            //Default when no animation clip
+            var start = MAnimControl.minTime;
+            var end = MAnimControl.maxTime;
             var startVal = start.asUnits(MTime.Unit.kMilliseconds);
             var endVal = end.asUnits(MTime.Unit.kMilliseconds);
-            MGlobal.displayInfo("Anim from "+startVal+" to "+endVal);
             var sequence = new M2Sequence {Length = (uint) (endVal - startVal)};
             sequence.Flags |= M2Sequence.SequenceFlags.Looped;
             wowModel.Sequences.Add(sequence);
@@ -97,6 +100,8 @@ namespace M2Export
                 MAnimControl.currentTime = 0;
                 mayaData[jointPath.fullPathName].BaseTranslation = joint.getTranslation(MSpace.Space.kTransform);
 
+                //TODO multiple sequences
+                //Add one sequence data
                 var transData = new List<Tuple<uint, MVector>>();
                 var rotData = new List<Tuple<uint, MQuaternion>>();
                 var scaleData = new List<Tuple<uint, MVector>>();
@@ -134,6 +139,7 @@ namespace M2Export
                 if(transData.Count > 0) mayaData[joint.fullPathName].Translation.Add(transData);
                 if(rotData.Count > 0) mayaData[joint.fullPathName].Rotation.Add(rotData);
                 if(scaleData.Count > 0) mayaData[joint.fullPathName].Scale.Add(scaleData);
+
                 processedJoints.Add(jointPath.fullPathName);
             }
 
