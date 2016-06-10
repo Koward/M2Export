@@ -155,7 +155,7 @@ global proc m2SeqEdit_CreateScrollAnimationClipLayout()
         deleteUI -layout $m2SeqEditorScrollLayout;
     }
     
-    scrollLayout -verticalScrollBarAlwaysVisible true -h 80 -verticalScrollBarThickness 16 -childResizable true $m2SeqEditorScrollLayout; 
+    scrollLayout -verticalScrollBarAlwaysVisible true -verticalScrollBarThickness 16 -childResizable true $m2SeqEditorScrollLayout; 
    
     int $nbAnimClips = size($gM2EditorCurrentNode) ? `getAttr -size ($gM2EditorCurrentNode + ".animClips")` : 0;
         
