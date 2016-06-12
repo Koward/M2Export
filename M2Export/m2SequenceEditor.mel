@@ -4,7 +4,7 @@
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 global proc m2SequenceEditor() {
-	//Find or create the m2Editor node so the m2 sequence editor can work on it. If there's none, create it.
+	//Find or create the m2Editor node so the m2 sequence editor can work on it.
 	global string $gM2EditorCurrentNode;
 	string $nodes[] = `ls -type "m2Editor"`;
 	if(size($nodes) == 0)
@@ -20,7 +20,10 @@ global proc m2SequenceEditor() {
 	}
 	
 	if(`window -ex sequenceEditorUI`) deleteUI sequenceEditorUI;
-	window -title "Sequences" sequenceEditorUI;
+	window 	-widthHeight 100 250
+			-title "Sequences" 
+			-sizeable 1 -resizeToFitChildren 1
+			sequenceEditorUI;
 	
 		// Name is legacy from old gameFbxExporter. It's just the main form layout.
 		string $m2SeqEditorExportTypeFormLayout = "m2SeqEditorExportTypeFormLayout";
@@ -28,8 +31,10 @@ global proc m2SequenceEditor() {
 		{           
 			deleteUI -layout $m2SeqEditorExportTypeFormLayout;
 		} 
+		
 		formLayout $m2SeqEditorExportTypeFormLayout;
-		m2SeqEdit_AnimationLayoutOrder($m2SeqEditorExportTypeFormLayout); 
+		m2SeqEdit_AnimationLayoutOrder($m2SeqEditorExportTypeFormLayout);
+		//string $m2SeqEditorExportTypeFormLayout = m2SeqEdit_CreateAnimationClipUIComponents();
 		
 	showWindow;
 }
@@ -39,14 +44,16 @@ global proc m2SequenceEditor() {
 // Attach in a specific order the animation clips sub form layout
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
+
 global proc m2SeqEdit_AnimationLayoutOrder(string $formLayout)
 { 
     string $animForm = m2SeqEdit_CreateAnimationClipUIComponents();   
-      
+
     formLayout -edit 
         -attachForm      $animForm   "top"     0 
         -attachForm      $animForm   "left"    0
         -attachForm      $animForm   "right"   0
+		-attachForm      $animForm   "bottom"   0
     $formLayout;
     
     setParent ..;    
@@ -64,35 +71,30 @@ global proc string m2SeqEdit_CreateAnimationClipUIComponents()
     string $form = `formLayout`;
     
     // Control names
-    $m2SeqEditorAnimClipFrameLayout = "m2SeqEditorAnimClipFrameLayout";
     $m2SeqEditorAnimClipFormLayout =  "m2SeqEditorAnimClipFormLayout";
     $m2SeqEditorClipNameLabel =  "m2SeqEditorClipNameLabel";
     $m2SeqEditorStartFrameLabel =  "m2SeqEditorStartFrameLabel";
     $m2SeqEditorEndFrameLabel =  "m2SeqEditorEndFrameLabel";
     $m2SeqEditorToggleSelectionClips =  "m2SeqEditorToggleSelectionClips";
 	
-    string $frameLabel = "Animation Clips";
-    frameLayout -width 100 -label $frameLabel
-                -collapse false -collapsable false 
-                $m2SeqEditorAnimClipFrameLayout;
-		formLayout -width 100 $m2SeqEditorAnimClipFormLayout;
-		
-			text -label "" emptyLabel;
-			text -label "Clip Name" $m2SeqEditorClipNameLabel;
-			text -label "Start" $m2SeqEditorStartFrameLabel;
-			text -label "End" $m2SeqEditorEndFrameLabel;
-			checkBox -label "" 
-					 -value 1
-					 -annotation "Toggle clips export of all clips"
-					 -changeCommand ("m2SeqEdit_ToggleSelectionClips #1")
-					 $m2SeqEditorToggleSelectionClips;
-		setParent ..;
-    setParent ..;   
+	formLayout -width 100 $m2SeqEditorAnimClipFormLayout;
+	//Titles at the top : creation
+		text -label "" emptyLabel;
+		text -label "Clip Name" $m2SeqEditorClipNameLabel;
+		text -label "Start" $m2SeqEditorStartFrameLabel;
+		text -label "End" $m2SeqEditorEndFrameLabel;
+		checkBox -label "" 
+				 -value 1
+				 -annotation "Toggle clips export of all clips"
+				 -changeCommand ("m2SeqEdit_ToggleSelectionClips #1")
+				 $m2SeqEditorToggleSelectionClips;
+	setParent ..;
     
      // Create Scroll Layout for the animation clips
     m2SeqEdit_CreateScrollAnimationClipLayout();
   
 		formLayout -edit    
+		//Titles at the top : attaching
 			-attachForm      emptyLabel  "top"    5  
 			-attachForm      emptyLabel  "left"   0  
 
@@ -109,16 +111,16 @@ global proc string m2SeqEdit_CreateAnimationClipUIComponents()
 			-attachForm      $m2SeqEditorToggleSelectionClips  "top"    5  
 			-attachForm      $m2SeqEditorToggleSelectionClips  "right"  19
 				
-		$m2SeqEditorAnimClipFormLayout;    
+		$m2SeqEditorAnimClipFormLayout;
 		
 		setParent ..;
     setParent ..;
     
-    formLayout -edit       
-       -attachForm      $m2SeqEditorAnimClipFrameLayout   "top"       0
-       -attachForm      $m2SeqEditorAnimClipFrameLayout   "left"      0
-       -attachForm      $m2SeqEditorAnimClipFrameLayout   "right"     0
-       -attachForm      $m2SeqEditorAnimClipFrameLayout   "bottom"    0
+	formLayout -edit       
+       -attachForm      $m2SeqEditorAnimClipFormLayout   "top"       0
+       -attachForm      $m2SeqEditorAnimClipFormLayout   "left"      0
+       -attachForm      $m2SeqEditorAnimClipFormLayout   "right"     0
+       -attachForm      $m2SeqEditorAnimClipFormLayout   "bottom"    0
     $form;
     
     setParent ..;
@@ -155,12 +157,11 @@ global proc m2SeqEdit_CreateScrollAnimationClipLayout()
         deleteUI -layout $m2SeqEditorScrollLayout;
     }
     
-    scrollLayout -verticalScrollBarAlwaysVisible true -verticalScrollBarThickness 16 -childResizable true $m2SeqEditorScrollLayout; 
+    scrollLayout -childResizable true $m2SeqEditorScrollLayout;
    
     int $nbAnimClips = size($gM2EditorCurrentNode) ? `getAttr -size ($gM2EditorCurrentNode + ".animClips")` : 0;
-        
-    int $editable = true;
 
+	// Each line is its own formLayout
     for( $i=0; $i < $nbAnimClips; $i++)
     {
         string $formLayoutClip = `formLayout -width 100`;
@@ -178,21 +179,21 @@ global proc m2SeqEdit_CreateScrollAnimationClipLayout()
         string $clipNameField = `textField -width 50 -placeholderText "Clip Name"`;               
         textField -e -text `getAttr ($gM2EditorCurrentNode + ".animClips[" + $i + "].animClipName")` 
                      -changeCommand ("m2SeqEdit_SetUniqueAnimationClipName " + $i + "\"#1\"" + $clipNameField) 
-                     -editable $editable
+                     -editable true
                      $clipNameField;
         floatField -width 35 
                    -precision 0 
                    -value `getAttr ($gM2EditorCurrentNode + ".animClips[" + $i + "].animClipStart")`
                    -annotation "Clip start frame"
                    -changeCommand ("setAttr(\"" + $gM2EditorCurrentNode + ".animClips[" + $i + "].animClipStart\") #1") 
-                   -editable $editable
+                   -editable true
                    startTime;
         floatField -width 35
                    -precision 0 
                    -value `getAttr ($gM2EditorCurrentNode + ".animClips[" + $i + "].animClipEnd")` 
                    -annotation "Clip end frame"
                    -changeCommand ("setAttr(\"" + $gM2EditorCurrentNode + ".animClips[" + $i + "].animClipEnd\") #1") 
-                   -editable $editable
+                   -editable true
                    endTime;
                
         symbolButton -image "adjustTimeline.png" 
@@ -238,9 +239,10 @@ global proc m2SeqEdit_CreateScrollAnimationClipLayout()
         $formLayoutClip;
         setParent ..;        
     }   
-    
+
+	
     string $form = `formLayout -width 100`;
-    
+    //Bottom grey line : creation
     text -label "" emptyLabel;
     textField -width 50 -enable false textFieldTemplate;
     floatField -width 35 -precision 0 -enable false startFieldTemplate;
@@ -252,6 +254,7 @@ global proc m2SeqEdit_CreateScrollAnimationClipLayout()
          
     int $top = ($nbAnimClips ? 6 : 2);
     formLayout -edit 
+	//Bottom grey line : attaching
             -attachForm      emptyLabel  "top"    0 
             -attachForm      emptyLabel  "left"   0            
                
@@ -274,7 +277,8 @@ global proc m2SeqEdit_CreateScrollAnimationClipLayout()
     formLayout -edit          
             -attachControl   $m2SeqEditorScrollLayout  "top"     5   $m2SeqEditorEndFrameLabel
             -attachForm      $m2SeqEditorScrollLayout  "left"    0 
-            -attachForm      $m2SeqEditorScrollLayout  "right"   0    
+            -attachForm      $m2SeqEditorScrollLayout  "right"   0
+            -attachForm      $m2SeqEditorScrollLayout  "bottom"   0
     $m2SeqEditorAnimClipFormLayout;
 
     setParent ..;

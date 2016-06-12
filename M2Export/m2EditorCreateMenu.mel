@@ -1,9 +1,10 @@
 global proc m2EditorCreateMenu() {
-	setParent MayaWindow;
+	global string $gMainWindow;
+	setParent $gMainWindow;
 	if (!`menuItem -q -exists m2EditorMenu`){
 		menu
 			-label "WoW Tools"
-			-parent MayaWindow
+			-parent $gMainWindow
 			-tearOff true m2EditorMenu;
 			menuItem
 				-label "Sequences"

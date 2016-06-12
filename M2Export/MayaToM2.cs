@@ -581,7 +581,7 @@ namespace M2Export
                 MItDependencyGraph.Level.kNodeLevel);
             while (!fileTextureIter.isDone)
             {
-                var wowTexture = new M2Texture {Type = M2Texture.TextureType.MonsterSkin1}; //TODO type with name
+                var wowTexture = new M2Texture {Type = M2Texture.TextureType.Monster1}; //TODO type with name
                 //TODO hardcoded textures
                 var nodeFn = new MFnDependencyNode(fileTextureIter.thisNode());
 

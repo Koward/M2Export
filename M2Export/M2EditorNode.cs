@@ -8,11 +8,10 @@ namespace M2Export
     public class M2EditorNode : MPxNode
     {
         // Animation clips
+        //TODO type enum
         public static MObject AnimClipName;
         public static MObject AnimClipStart;
         public static MObject AnimClipEnd;
-
-        //TODO type enum
         public static MObject LoopingFlag;
         public static MObject LowPriorityFlag;
         public static MObject Repetitions;
@@ -23,38 +22,47 @@ namespace M2Export
 
         public static MObject AnimClips;
 
-        [MPxNodeInitializer]
-        public static bool Initialize()
+        public static void InitializeAnimClips()
         {
             var tAttr = new MFnTypedAttribute();
             var nAttr = new MFnNumericAttribute();
             var cAttr = new MFnCompoundAttribute();
 
-            // Animation clips
             AnimClipName = tAttr.create("animClipName", "acn", MFnData.Type.kString);
+            addAttribute(AnimClipName);
             AnimClipStart = nAttr.create("animClipStart", "acs", MFnNumericData.Type.kInt);
-            nAttr.setMin(0);
+                nAttr.setMin(0);
+            addAttribute(AnimClipStart);
             AnimClipEnd = nAttr.create("animClipEnd", "ace", MFnNumericData.Type.kInt);
-            nAttr.setMin(0);
+                nAttr.setMin(0);
+            addAttribute(AnimClipEnd);
             LoopingFlag = nAttr.create("animClipLooping", "acl", MFnNumericData.Type.kBoolean);
-            nAttr.setDefault(true);
+                nAttr.setDefault(true);
+            addAttribute(LoopingFlag);
             LowPriorityFlag = nAttr.create("animClipLowPriority", "aclp", MFnNumericData.Type.kBoolean);
-            nAttr.setDefault(true);
+                nAttr.setDefault(true);
+            addAttribute(LowPriorityFlag);
             Repetitions = nAttr.create("animClipRep", "acRep", MFnNumericData.Type.k2Float);
-            nAttr.setDefault((float) 0, 0);
-            nAttr.setMin(0, 0);
+                nAttr.setDefault((float) 0, 0);
+                nAttr.setMin(0, 0);
+            addAttribute(Repetitions);
             BlendingFlag = nAttr.create("animClipBlending", "acb", MFnNumericData.Type.kBoolean);
-            nAttr.setDefault(true);
+                nAttr.setDefault(true);
+            addAttribute(BlendingFlag);
             BlendTime = nAttr.create("animClipBlendTime", "acbt", MFnNumericData.Type.k2Int);
-            nAttr.setDefault(150, 150);
-            nAttr.setMin(0, 0);
+                nAttr.setDefault(150, 150);
+                nAttr.setMin(0, 0);
+            addAttribute(BlendTime);
             Probability = nAttr.create("animClipProbability", "acp", MFnNumericData.Type.kFloat);
-            nAttr.setDefault((float) 100);
-            nAttr.setMin(0);
-            nAttr.setMax(100);
+                nAttr.setDefault((float) 100);
+                nAttr.setMin(0);
+                nAttr.setMax(100);
+            addAttribute(Probability);
             ExportAnimClip = nAttr.create("exportAnimClip", "eac", MFnNumericData.Type.kBoolean);
-            nAttr.setDefault(true);
+                nAttr.setDefault(true);
+            addAttribute(ExportAnimClip);
 
+            /*
             addAttribute(AnimClipName);
             addAttribute(AnimClipStart);
             addAttribute(AnimClipEnd);
@@ -65,6 +73,7 @@ namespace M2Export
             addAttribute(BlendTime);
             addAttribute(Probability);
             addAttribute(ExportAnimClip);
+            */
 
             AnimClips = cAttr.create("animClips", "clips");
             cAttr.addChild(AnimClipName);
@@ -78,9 +87,13 @@ namespace M2Export
             cAttr.addChild(Probability);
             cAttr.addChild(ExportAnimClip);
             cAttr.isArray = true;
-
             addAttribute(AnimClips);
+        }
 
+        [MPxNodeInitializer]
+        public static bool Initialize()
+        {
+            InitializeAnimClips();
             return true;
         }
     }
