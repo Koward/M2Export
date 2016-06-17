@@ -17,12 +17,12 @@ string $callback )
 		columnLayout -adj true;
 
 			text -label "M2 Export Plugin\n" -align "center";
-		
+			text -label "[Warning] Older versions export less features.\n" -align "left";
 			optionMenu -label "WoW Expansion" expansion;
-				menuItem -label "Classic";
-				menuItem -label "Burning Crusade";
-				menuItem -label "Wrath of the Lich King";
-				menuItem -label "Cataclysm - Warlords of Draenor";
+				menuItem -label "Classic (256)";
+				menuItem -label "Burning Crusade (260)";
+				menuItem -label "Wrath of the Lich King (264)";
+				menuItem -label "Cataclysm - Warlords of Draenor (272)";
 			optionMenu -e -sl 3 expansion;
 		
 		// split the previous set of options

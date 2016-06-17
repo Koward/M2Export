@@ -58,17 +58,70 @@ namespace M2Export
             var mayaData = new Dictionary<string, MayaM2Bone>();
 
             // Sequences
-            //TODO multiple sequences
-            //TODO find "m2Editor" node, get the "animClips" array and build sequence if the export attribute is true
+            var seqList = new List<MayaM2Sequence>();
+            var editorNames = new MStringArray();
+            MGlobal.executeCommand("ls -type m2Editor", editorNames);
+            var editorName = editorNames[0];
+            MGlobal.displayInfo("Searching editor node... Result : "+editorName);
+            if (!string.IsNullOrEmpty(editorName))
+            {
+                MGlobal.displayInfo("Editor data found.");
+                int numberOfClips;
+                MGlobal.executeCommand("getAttr -size " + editorName + ".animClips", out numberOfClips);
+                MGlobal.displayInfo("\tExtracting "+numberOfClips+" clips.");
+                for (var i = 0; i < numberOfClips; i++)
+                {
+                    int start;
+                    int end;
+                    int type;
+                    bool looping;
+                    bool lowPriority;
+                    int repMin;
+                    int repMax;
+                    bool blending;
+                    int blendTimeStart;
+                    int blendTimeEnd;
+                    double rarity;
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipStart", out start);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipEnd", out end);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipType", out type);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipLooping", out looping);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipLowPriority", out lowPriority);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipRepMin", out repMin);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipRepMax", out repMax);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipBlending", out blending);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipBlendTimeStart", out blendTimeStart);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipBlendTimeEnd", out blendTimeEnd);
+                    M2EditorNode.GetClipAttribute(editorName, i, "animClipRarity", out rarity);
+                    var mayaSeq = new MayaM2Sequence
+                    {
+                        Start = start,
+                        End = end,
+                        Type = type,
+                        IsLoop = looping,
+                        IsLowPriority = lowPriority,
+                        MinimumRepetitions = repMin,
+                        MaximumRepetitions = repMax,
+                        IsBlending = blending,
+                        BlendTimeStart = blendTimeStart,
+                        BlendTimeEnd = blendTimeEnd,
+                        Probability = (short) (rarity * short.MaxValue)
+                    };
+                    seqList.Add(mayaSeq);
+                }
+            }
 
-            //Default when no animation clip
-            var start = MAnimControl.minTime;
-            var end = MAnimControl.maxTime;
-            var startVal = start.asUnits(MTime.Unit.kMilliseconds);
-            var endVal = end.asUnits(MTime.Unit.kMilliseconds);
-            var sequence = new M2Sequence {Length = (uint) (endVal - startVal)};
-            sequence.Flags |= M2Sequence.SequenceFlags.Looped;
-            wowModel.Sequences.Add(sequence);
+            //Default when no animation clip, tries to get slider range.
+            if (seqList.Count == 0)
+            {
+                var mayaSeq = new MayaM2Sequence
+                {
+                    Start = (int) MAnimControl.minTime.asUnits(MTime.Unit.kMilliseconds),
+                    End = (int) MAnimControl.maxTime.asUnits(MTime.Unit.kMilliseconds),
+                };
+                if (mayaSeq.Start != mayaSeq.End) mayaSeq.IsLoop = true;
+                seqList.Add(mayaSeq);
+            }
 
             //Goal of iteration : Extract raw joint data and store it in intermediate object, MayaM2Bone
             var processedJoints = new HashSet<string>();
@@ -100,45 +153,50 @@ namespace M2Export
                 MAnimControl.currentTime = 0;
                 mayaData[jointPath.fullPathName].BaseTranslation = joint.getTranslation(MSpace.Space.kTransform);
 
-                //TODO multiple sequences
-                //Add one sequence data
-                var transData = new List<Tuple<uint, MVector>>();
-                var rotData = new List<Tuple<uint, MQuaternion>>();
-                var scaleData = new List<Tuple<uint, MVector>>();
-                for (var i = startVal; i < endVal; i+=33)//TODO FIXME What if not multiple of 33 ?
+                foreach (var seq in seqList)
                 {
-                    //Get data for this joint for this frame
-                    MAnimControl.currentTime = new MTime(i, MTime.Unit.kMilliseconds);
+                    var transData = new List<Tuple<uint, MVector>>();
+                    var rotData = new List<Tuple<uint, MQuaternion>>();
+                    var scaleData = new List<Tuple<uint, MVector>>();
+                    for (var i = seq.Start; i < seq.End; i += 33) //TODO FIXME What if not multiple of 33 ?
+                    {
+                        //Get data for this joint for this frame
+                        MAnimControl.currentTime = new MTime(i, MTime.Unit.kMilliseconds);
 
-                    var translation = joint.getTranslation(MSpace.Space.kTransform);
-                    var rotation = new MQuaternion();
-                    joint.getRotation(rotation, MSpace.Space.kTransform);
-                    var scaleArray = new double[3];
-                    joint.getScale(scaleArray);
-                    var scale = new MVector(scaleArray);
+                        var translation = joint.getTranslation(MSpace.Space.kTransform);
+                        var rotation = new MQuaternion();
+                        joint.getRotation(rotation, MSpace.Space.kTransform);
+                        var scaleArray = new double[3];
+                        joint.getScale(scaleArray);
+                        var scale = new MVector(scaleArray);
 
-                    if (!translation.isEquivalent(MVector.zero, Epsilon))
-                    {
-                        var previousIsTheSame = transData.Count > 0 && transData.Last().Item2.isEquivalent(translation, Epsilon);
-                        if (!previousIsTheSame)
-                            transData.Add(new Tuple<uint, MVector>((uint) (i - startVal), translation));
+                        if (!translation.isEquivalent(MVector.zero, Epsilon))
+                        {
+                            var previousIsTheSame = transData.Count > 0 &&
+                                                    transData.Last().Item2.isEquivalent(translation, Epsilon);
+                            if (!previousIsTheSame)
+                                transData.Add(new Tuple<uint, MVector>((uint) (i - seq.Start), translation));
+                        }
+                        if (!rotation.isEquivalent(MQuaternion.identity, Epsilon))
+                        {
+                            var previousIsTheSame = rotData.Count > 0 &&
+                                                    rotData.Last().Item2.isEquivalent(rotation, Epsilon);
+                            if (!previousIsTheSame)
+                                rotData.Add(new Tuple<uint, MQuaternion>((uint) (i - seq.Start), rotation));
+                        }
+                        if (!scale.isEquivalent(MVector.one, Epsilon))
+                        {
+                            var previousIsTheSame = scaleData.Count > 0 &&
+                                                    scaleData.Last().Item2.isEquivalent(scale, Epsilon);
+                            if (!previousIsTheSame)
+                                scaleData.Add(new Tuple<uint, MVector>((uint) (i - seq.Start), scale));
+                        }
                     }
-                    if (!rotation.isEquivalent(MQuaternion.identity, Epsilon))
-                    {
-                        var previousIsTheSame = rotData.Count > 0 && rotData.Last().Item2.isEquivalent(rotation, Epsilon);
-                        if (!previousIsTheSame)
-                            rotData.Add(new Tuple<uint, MQuaternion>((uint) (i - startVal), rotation));
-                    }
-                    if (!scale.isEquivalent(MVector.one, Epsilon))
-                    {
-                        var previousIsTheSame = scaleData.Count > 0 && scaleData.Last().Item2.isEquivalent(scale, Epsilon);
-                        if (!previousIsTheSame)
-                            scaleData.Add(new Tuple<uint, MVector>((uint) (i - startVal), scale));
-                    }
+                    if (transData.Count > 0) mayaData[joint.fullPathName].Translation.Add(transData);
+                    if (rotData.Count > 0) mayaData[joint.fullPathName].Rotation.Add(rotData);
+                    if (scaleData.Count > 0) mayaData[joint.fullPathName].Scale.Add(scaleData);
                 }
-                if(transData.Count > 0) mayaData[joint.fullPathName].Translation.Add(transData);
-                if(rotData.Count > 0) mayaData[joint.fullPathName].Rotation.Add(rotData);
-                if(scaleData.Count > 0) mayaData[joint.fullPathName].Scale.Add(scaleData);
+
 
                 processedJoints.Add(jointPath.fullPathName);
             }
@@ -168,16 +226,17 @@ namespace M2Export
                 processedJoints.Add(jointPath.fullPathName);
             }
 
-            //Goal of iteration : Add to WoW model the joints data, converted to appropriate M2 objects with MayaM2Bone.Bone()
-            processedJoints.Clear();
-            for(var jointIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kJoint); !jointIter.isDone; jointIter.next())
+            MayaM2Sequence.NormalizeProbability(seqList);
+            foreach (var seq in seqList)
             {
-                var jointPath = new MDagPath();
-                jointIter.getPath(jointPath);
+                //TODO SubAnimationId?
+                wowModel.Sequences.Add(seq.ToWoW());
+            }
 
-                if (processedJoints.Contains(jointPath.fullPathName)) continue;
-                mayaData[jointPath.fullPathName].Index = wowModel.Bones.Count;
-                wowModel.Bones.Add(mayaData[jointPath.fullPathName].ToBone());
+            foreach (var entry in mayaData)
+            {
+                entry.Value.Index = wowModel.Bones.Count;
+                wowModel.Bones.Add(entry.Value.ToBone());
             }
 
             var jointNameIds = new Dictionary<string, short>();//Maps a joint name to the WoW bone position in list.
@@ -267,6 +326,7 @@ namespace M2Export
                             MGlobal.displayWarning("This vertex is connected to more than "+MaxWeightsNumber+ " joints. Only the " + MaxWeightsNumber + " biggest will be exported.");
                         indicesAndWeights = indicesAndWeights.OrderByDescending(p => p.Item2).Take(MaxWeightsNumber).ToList();
                         Debug.Assert(indicesAndWeights.Count <= MaxWeightsNumber);
+                        //Normalize weight
                         var weightSum = indicesAndWeights.Sum(p => p.Item2);
                         var availableWeight = byte.MaxValue;
                         for(var j = 0; j < indicesAndWeights.Count; j++)
