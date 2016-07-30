@@ -2,7 +2,7 @@
 using System.Linq;
 using M2Lib.m2;
 
-namespace M2Export
+namespace M2Export.types
 {
     public class MayaM2Sequence
     {
@@ -42,17 +42,22 @@ namespace M2Export
 
         public static void NormalizeProbability(List<MayaM2Sequence> list)
         {
-            var sum = list.Sum(s => s.Probability);
-            var remaining = short.MaxValue;
-            foreach (var seq in list)
+            var idToSum = new Dictionary<int, int>();
+            foreach (var seq in list) idToSum[seq.Type] = 0;
+            foreach (var seq in list) idToSum[seq.Type] += seq.Probability;
+            foreach (var id in idToSum.Keys)
             {
-                var fixedProba = (short) (seq.Probability/(float) sum * short.MaxValue);
-                seq.Probability = fixedProba > remaining ? remaining : fixedProba;
-                remaining -= seq.Probability;
-            }
-            if (remaining > 0)
-            {
-                list.Last().Probability += remaining;
+                var remaining = short.MaxValue;
+                foreach (var seq in list.Where(s=>s.Type==id))
+                {
+                    var fixedProba = (short) (seq.Probability/(float) idToSum[seq.Type] * short.MaxValue);
+                    seq.Probability = fixedProba > remaining ? remaining : fixedProba;
+                    remaining -= seq.Probability;
+                }
+                if (remaining > 0)
+                {
+                    list.Last(s => s.Type == id).Probability += remaining;
+                }
             }
         }
     }

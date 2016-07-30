@@ -4,7 +4,7 @@ using Autodesk.Maya.OpenMaya;
 using M2Lib.m2;
 using M2Lib.types;
 
-namespace M2Export
+namespace M2Export.types
 {
     /// <summary>
     /// Allows to edit data as Maya classes (like axis inversion, rotations..) before adding it to M2Bones which converts everything to M2Lib classes.
@@ -19,7 +19,7 @@ namespace M2Export
         public List<List<Tuple<uint, MVector>>> Translation { get; } = new List<List<Tuple<uint, MVector>>>();
         public List<List<Tuple<uint, MQuaternion>>> Rotation { get; } = new List<List<Tuple<uint, MQuaternion>>>();
         public List<List<Tuple<uint, MVector>>> Scale { get; } = new List<List<Tuple<uint, MVector>>>();
-        public int Index { get; set; } = -1; //Predicted index in M2 Bone List. Should be set before converting to Bone.
+        public int GlobalIndex { get; set; } = -1; //Predicted index in M2 Bone List. Should be set before converting to Bone.
 
         private static C3Vector ConvertVector(MVector point) => new C3Vector((float) point.x, (float) point.y, (float) point.z);
         private static C4Quaternion ConvertVector(MQuaternion point) => new C4Quaternion((float) point.x, (float) point.y, (float) point.z, (float) point.w);
@@ -32,7 +32,7 @@ namespace M2Export
             var bone = new M2Bone
             {
                 KeyBoneId = GetBoneType(),
-                ParentBone = (short) (Parent?.Index ?? -1),
+                ParentBone = (short) (Parent?.GlobalIndex ?? -1),
                 Pivot = ConvertVector(AxisInvert(GetPivot()))
             };
             foreach (var list in Translation)

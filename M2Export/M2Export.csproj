@@ -70,10 +70,15 @@
     <Compile Include="M2Editor.cs" />
     <Compile Include="M2EditorNode.cs" />
     <Compile Include="M2Translator.cs" />
-    <Compile Include="MayaM2Bone.cs" />
-    <Compile Include="MayaM2Sequence.cs" />
+    <Compile Include="types\MayaM2Bone.cs" />
+    <Compile Include="types\MayaM2BoneSet.cs" />
+    <Compile Include="types\MayaM2Mesh.cs" />
+    <Compile Include="types\MayaM2Triangle.cs" />
+    <Compile Include="types\MayaM2Sequence.cs" />
     <Compile Include="MayaToM2.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="types\MayaM2Texture.cs" />
+    <Compile Include="types\MayaM2Vertex.cs" />
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.0">

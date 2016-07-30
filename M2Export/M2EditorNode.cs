@@ -33,19 +33,12 @@ namespace M2Export
             return true;
         }
 
-        public static void CreateTypeAttribute()
-        {
-            var eAttr = new MFnEnumAttribute();
-            Type = eAttr.create("animClipType", "act");
-                foreach(var entry in AnimationData.NameToId) eAttr.addField(entry.Key, (short) entry.Value);//TODO check performance
-            addAttribute(Type);
-        }
-
         public static void InitializeAnimClips()
         {
             var tAttr = new MFnTypedAttribute();
             var nAttr = new MFnNumericAttribute();
             var cAttr = new MFnCompoundAttribute();
+            var eAttr = new MFnEnumAttribute();
 
             Name = tAttr.create("animClipName", "acn", MFnData.Type.kString);
             addAttribute(Name);
@@ -55,7 +48,10 @@ namespace M2Export
             End = nAttr.create("animClipEnd", "ace", MFnNumericData.Type.kInt);
                 nAttr.setMin(0);
             addAttribute(End);
-            CreateTypeAttribute();//"animClipType"
+            Type = eAttr.create("animClipType", "act");
+                foreach(var entry in AnimationData.NameToId) eAttr.addField(entry.Key, (short) entry.Value);//TODO check performance
+                eAttr.setDefault(0);
+            addAttribute(Type);
             LoopingFlag = nAttr.create("animClipLooping", "acl", MFnNumericData.Type.kBoolean);
                 nAttr.setDefault(true);
             addAttribute(LoopingFlag);
