@@ -38,16 +38,13 @@ namespace M2Export
 
             MGlobal.displayInfo("Building model " + wowModel.Name);
 
-            List<MayaM2Sequence> seqList;
-            ExtractSequences(out seqList);
+            var seqList = ExtractSequences();
 
-            List<MayaM2Bone> boneList;
-            Dictionary<string, MayaM2Bone> jointMap;
-            ExtractJoints(out boneList, out jointMap, seqList);
+            var jointMap = ExtractJoints(seqList);
 
             var globalVertexList = new List<MayaM2Vertex>();
-            List<MayaM2Mesh> meshList;
-            ExtractStandardMeshes(out meshList, jointMap, globalVertexList);
+            var meshList = new List<MayaM2Mesh>();
+            ExtractStandardMeshes(meshList, jointMap, globalVertexList);
 
             //To WoW proper classes
             InjectCollisionMesh(wowModel);
@@ -58,7 +55,7 @@ namespace M2Export
                 wowModel.Sequences.Add(seq.ToWoW());
             }
 
-            foreach (var bone in boneList)
+            foreach (var bone in jointMap.Values)
             {
                 bone.GlobalIndex = wowModel.Bones.Count;
                 wowModel.Bones.Add(bone.ToBone());
@@ -126,10 +123,10 @@ namespace M2Export
             MAnimControl.currentTime = initialTime;
         }
 
-        private static void ExtractSequences(out List<MayaM2Sequence> seqList)
+        private static List<MayaM2Sequence> ExtractSequences()
         {
             // Sequences
-            seqList = new List<MayaM2Sequence>();
+            List<MayaM2Sequence> seqList = new List<MayaM2Sequence>();
             var editorNames = new MStringArray();
             MGlobal.executeCommand("ls -type m2Editor", editorNames);
             var editorName = editorNames[0];
@@ -183,7 +180,7 @@ namespace M2Export
             }
 
             //Default when no animation clip, tries to get slider range.
-            if (seqList.Count != 0) return;
+            if (seqList.Count != 0)
             {
                 var mayaSeq = new MayaM2Sequence
                 {
@@ -193,12 +190,12 @@ namespace M2Export
                 if (mayaSeq.Start != mayaSeq.End) mayaSeq.IsLoop = true;
                 seqList.Add(mayaSeq);
             }
+            return seqList;
         }
 
-        private static void ExtractJoints(out List<MayaM2Bone> boneList, out Dictionary<string, MayaM2Bone> jointMap, List<MayaM2Sequence> seqList)
+        private static Dictionary<string, MayaM2Bone> ExtractJoints(List<MayaM2Sequence> seqList)
         {
-            boneList = new List<MayaM2Bone>();
-            jointMap = new Dictionary<string, MayaM2Bone>();
+            var jointMap = new Dictionary<string, MayaM2Bone>();
 
             //Goal of iteration : Extract raw joint data and store it in intermediate object, MayaM2Bone
             var processedJoints = new HashSet<string>();
@@ -210,7 +207,6 @@ namespace M2Export
                 MGlobal.displayInfo("Extracting raw data of "+jointPath.fullPathName);
                 var joint = new MFnIkJoint(jointPath);
                 var mayaBone = new MayaM2Bone();
-                boneList.Add(mayaBone);
                 jointMap[jointPath.fullPathName] = mayaBone;
 
                 // Hierarchy
@@ -304,6 +300,7 @@ namespace M2Export
 
                 processedJoints.Add(jointPath.fullPathName);
             }
+            return jointMap;
         }
 
         /// <summary>
@@ -341,9 +338,9 @@ namespace M2Export
             meshFunctions.getUVSetNames(uvsets);
 
             //Bone Weights
-            List<MDoubleArray> vertexWeights;
-            MDagPathArray influenceObjects;
-            GetMeshWeightData(out vertexWeights, out influenceObjects, meshPath);
+            var vertexWeights = new List<MDoubleArray>();
+            var influenceObjects = new MDagPathArray();
+            GetMeshWeightData(vertexWeights, influenceObjects, meshPath);
 
             //Positions
             var positions = new MFloatPointArray();
@@ -419,11 +416,9 @@ namespace M2Export
         /// <param name="vertexWeights"></param>
         /// <param name="influenceObjects"></param>
         /// <param name="meshPath"></param>
-        private static void GetMeshWeightData(out List<MDoubleArray> vertexWeights, out MDagPathArray influenceObjects, MDagPath meshPath)
+        private static void GetMeshWeightData(List<MDoubleArray> vertexWeights, MDagPathArray influenceObjects, MDagPath meshPath)
         {
             var fnMesh = new MFnMesh(meshPath);
-            vertexWeights = new List<MDoubleArray>();
-            influenceObjects = new MDagPathArray();
 
             // Get any attached skin cluster
             var hasSkinCluster = false;
@@ -475,9 +470,8 @@ namespace M2Export
             }
         }
 
-        private static void ExtractStandardMeshes(out List<MayaM2Mesh> meshList, Dictionary<string, MayaM2Bone> jointMap, List<MayaM2Vertex> globalVertexList)
+        private static void ExtractStandardMeshes(List<MayaM2Mesh> meshList, Dictionary<string, MayaM2Bone> jointMap, List<MayaM2Vertex> globalVertexList)
         {
-            meshList = new List<MayaM2Mesh>();
             for(var meshIter = new MItDag(MItDag.TraversalType.kDepthFirst, MFn.Type.kMesh);
             !meshIter.isDone; meshIter.next())
             {
@@ -492,6 +486,7 @@ namespace M2Export
                 var mesh = new MayaM2Mesh();
                 ExtractMeshGeometry(mesh, meshPath, jointMap, globalVertexList);
                 ExtractMeshShaders(mesh, meshPath);
+                meshList.Add(mesh);
             }
         }
 
